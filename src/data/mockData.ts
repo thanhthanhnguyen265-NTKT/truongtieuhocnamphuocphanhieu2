@@ -122,6 +122,26 @@ export const INITIAL_TEACHERS: Teacher[] = [
     },
   },
   {
+    id: 'T_LE_THI_VY',
+    fullName: 'Cô Lê Thị Vy',
+    email: 'lethivy@namphuoc.edu.vn',
+    phone: '0905 567 890',
+    role: 'homeroom',
+    assignedClassIds: ['C1B'],
+    subjects: ['GVCN Lớp 1B', 'Toán', 'Tiếng Việt', 'Đạo đức'],
+    permissions: {
+      view: true,
+      create: true,
+      edit: true,
+      delete: false,
+      export: true,
+      import: true,
+      attendance: true,
+      feedback: true,
+      competition: true,
+    },
+  },
+  {
     id: 'T004',
     fullName: 'Thầy Trần Anh Tuấn',
     email: 'tran.anhtuan.eng@namphuoc.edu.vn',
@@ -185,7 +205,7 @@ export const INITIAL_TEACHERS: Teacher[] = [
 
 export const INITIAL_CLASSES: ClassRoom[] = [
   { id: 'C1A', name: '1A', gradeId: 'G1', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Thầy Nguyễn Văn Nam', avatarThemeId: 'rabbit', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.101', notes: 'Lớp Thỏ Trắng Thông Thái' },
-  { id: 'C1B', name: '1B', gradeId: 'G1', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Lê Thị Vy', avatarThemeId: 'cat', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.102', notes: 'Lớp Cô Lê Thị Vy' },
+  { id: 'C1B', name: '1B', gradeId: 'G1', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T_LE_THI_VY', customTeacherName: 'Cô Lê Thị Vy', avatarThemeId: 'cat', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.102', notes: 'Lớp Cô Lê Thị Vy' },
   { id: 'C2A', name: '2A', gradeId: 'G2', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Trần Thị Hương', avatarThemeId: 'puppy', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.201', notes: 'Lớp Cún Con Vui Vẻ' },
   { id: 'C2B', name: '2B', gradeId: 'G2', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Thầy Phạm Văn Kiên', avatarThemeId: 'squirrel', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.202', notes: 'Lớp Sóc Nâu Nhanh Nhẹn' },
   { id: 'C3A', name: '3A', gradeId: 'G3', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Hoàng Thu Thảo', avatarThemeId: 'sunflower', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.301', notes: 'Lớp Hoa Hướng Dương' },

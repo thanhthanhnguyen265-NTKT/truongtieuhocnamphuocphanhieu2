@@ -39,6 +39,8 @@ interface ParsedStudentRow {
   parentPhone: string;
   parentEmail?: string;
   notes?: string;
+  classId?: string;
+  className?: string;
   isValid: boolean;
   error?: string;
 }
@@ -199,6 +201,27 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
           const parentEmail = String(row['Email'] || '');
           const notes = String(row['Ghi chú'] || '');
 
+          // Check if row specifies a class (e.g. "1B", "Lớp 1B", "Cô Lê Thị Vy")
+          const classInRow = String(
+            row['Lớp'] || row['Lớp học'] || row['Tên lớp'] || row['Class'] || row['GVCN'] || ''
+          ).trim();
+          let rowClassId = selectedClass;
+          let rowClassName = '';
+          if (classInRow) {
+            const matchedCls = db.classes.find(
+              (c) =>
+                c.id.toLowerCase() === classInRow.toLowerCase() ||
+                c.name.toLowerCase() === classInRow.toLowerCase() ||
+                `lớp ${c.name.toLowerCase()}` === classInRow.toLowerCase() ||
+                classInRow.toLowerCase().includes(c.name.toLowerCase()) ||
+                (c.customTeacherName && classInRow.toLowerCase().includes(c.customTeacherName.toLowerCase()))
+            );
+            if (matchedCls) {
+              rowClassId = matchedCls.id;
+              rowClassName = matchedCls.name;
+            }
+          }
+
           nextNum++;
           const isValid = String(fullName).trim().length >= 2;
 
@@ -213,6 +236,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             parentPhone,
             parentEmail,
             notes,
+            classId: rowClassId,
+            className: rowClassName,
             isValid,
             error: !isValid ? 'Dòng thiếu họ tên học sinh' : undefined,
           };
@@ -250,15 +275,18 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     if (importMode === 'replace') {
       // Remove current students in this class
       newStudentsList = newStudentsList.filter(
-        (s) => !(s.currentClassId === selectedClass && s.currentSchoolYearId === db.currentSchoolYearId)
+        (s) => !(s.currentClassId === selectedClass && (s.currentSchoolYearId === db.currentSchoolYearId || s.currentSchoolYearId === 'SY2026_2027'))
       );
     }
 
     validRows.forEach((row) => {
+      const stuClassId = row.classId || selectedClass;
+      const stuClass = db.classes.find((c) => c.id === stuClassId) || targetClass;
+
       const existingIdx = newStudentsList.findIndex(
         (s) =>
           s.studentCode.trim().toLowerCase() === row.studentCode.trim().toLowerCase() ||
-          (s.fullName.trim().toLowerCase() === row.fullName.trim().toLowerCase() && s.currentClassId === selectedClass)
+          (s.fullName.trim().toLowerCase() === row.fullName.trim().toLowerCase() && (s.currentClassId === stuClassId || s.currentClassId === stuClass?.name))
       );
 
       if (existingIdx >= 0 && importMode === 'merge') {
@@ -270,6 +298,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
           address: row.address,
           parentName: row.parentName || newStudentsList[existingIdx].parentName,
           parentPhone: row.parentPhone || newStudentsList[existingIdx].parentPhone,
+          currentClassId: stuClassId,
+          currentGradeId: stuClass?.gradeId || newStudentsList[existingIdx].currentGradeId,
           updatedAt: new Date().toISOString(),
         };
         updatedCount++;
@@ -284,9 +314,9 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
           parentName: row.parentName,
           parentPhone: row.parentPhone,
           parentEmail: row.parentEmail,
-          currentClassId: selectedClass,
-          currentGradeId: targetClass?.gradeId || 'G4',
-          currentSchoolYearId: db.currentSchoolYearId,
+          currentClassId: stuClassId,
+          currentGradeId: stuClass?.gradeId || targetClass?.gradeId || 'G1',
+          currentSchoolYearId: db.currentSchoolYearId || 'SY2026_2027',
           notes: row.notes,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -440,7 +470,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                       className="w-full px-3 py-2 text-xs font-bold border border-blue-300 rounded-xl bg-white text-blue-900 shadow-xs outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer"
                     >
                       {db.classes
-                        .filter((c) => c.schoolYearId === db.currentSchoolYearId)
+                        .filter((c) => !c.schoolYearId || c.schoolYearId === db.currentSchoolYearId || c.schoolYearId === 'SY2026_2027' || db.classes.length <= 10)
                         .map((c) => {
                           const matchedTeacher = db.teachers.find((t) => t.id === c.homeroomTeacherId);
                           const teacherName = c.customTeacherName || matchedTeacher?.fullName || 'Chưa phân công';

@@ -277,6 +277,25 @@ class StorageService {
     }
     if (!parsed.teachers || !Array.isArray(parsed.teachers) || parsed.teachers.length === 0) {
       parsed.teachers = base.teachers;
+    } else {
+      const hasVy = parsed.teachers.some((t: Teacher) => t.fullName?.includes('Lê Thị Vy'));
+      if (!hasVy) {
+        const vyTeacher = base.teachers.find((t) => t.id === 'T_LE_THI_VY');
+        if (vyTeacher) parsed.teachers.push(vyTeacher);
+      }
+    }
+
+    if (parsed.classes && Array.isArray(parsed.classes)) {
+      parsed.classes = parsed.classes.map((cls: any) => {
+        if (cls.id === 'C1B' || cls.name === '1B') {
+          return {
+            ...cls,
+            customTeacherName: 'Cô Lê Thị Vy',
+            homeroomTeacherId: 'T_LE_THI_VY',
+          };
+        }
+        return cls;
+      });
     }
     if (!parsed.criteria || !Array.isArray(parsed.criteria) || parsed.criteria.length === 0) {
       parsed.criteria = base.criteria;

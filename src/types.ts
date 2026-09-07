@@ -307,6 +307,22 @@ export interface MonthlyAssessmentTT27 {
 }
 
 // Quản lý lớp học dành cho Giáo viên Chuyên / Nhô
+export interface SubjectClassEvaluation {
+  studentId: string;
+  semester: 'HK1' | 'HK2';
+  period?: 'Giữa kỳ' | 'Cuối kỳ';
+  level: 'T' | 'H' | 'C';
+  score?: number;
+  note: string;
+  updatedAt: string;
+}
+
+export interface SubjectClassAttendanceDay {
+  date: string; // YYYY-MM-DD
+  records: Record<string, AttendanceStatus>;
+  notes?: Record<string, string>;
+}
+
 export interface SubjectClass {
   id: string;
   name: string; // e.g., 'Tiếng Anh 4A', 'Tin học Khối 4', 'CLB Mỹ thuật'
@@ -320,6 +336,8 @@ export interface SubjectClass {
   roomNumber?: string;
   schedule?: string;
   notes?: string;
+  evaluations?: SubjectClassEvaluation[];
+  attendanceDays?: SubjectClassAttendanceDay[];
   createdAt: string;
   updatedAt: string;
 }

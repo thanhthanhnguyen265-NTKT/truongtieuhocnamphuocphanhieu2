@@ -28,6 +28,7 @@ interface StudentsViewProps {
   onOpenImportModal: (classId?: string) => void;
   onOpenOwnerModal: (action: string) => void;
   searchQuery?: string;
+  autoOpenImport?: boolean;
 }
 
 export const StudentsView: React.FC<StudentsViewProps> = ({
@@ -36,6 +37,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   onOpenImportModal,
   onOpenOwnerModal,
   searchQuery = '',
+  autoOpenImport = false,
 }) => {
   const db = storage.getDb();
   const [selectedYearId, setSelectedYearId] = useState<string>(db.currentSchoolYearId);
@@ -50,6 +52,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       setSelectedClassId(initialClassId);
     }
   }, [initialClassId]);
+
+  useEffect(() => {
+    if (autoOpenImport) {
+      onOpenImportModal(selectedClassId !== 'all' ? selectedClassId : undefined);
+    }
+  }, [autoOpenImport]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
@@ -293,13 +301,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   // Filter students
   const filteredStudents = db.students.filter((s) => {
-    if (selectedYearId !== 'all' && s.currentSchoolYearId && s.currentSchoolYearId !== selectedYearId) return false;
+    if (selectedYearId !== 'all' && s.currentSchoolYearId) {
+      const normS = s.currentSchoolYearId.replace(/[-_]/g, '');
+      const normY = selectedYearId.replace(/[-_]/g, '');
+      if (normS !== normY && s.currentSchoolYearId !== 'SY2026_2027') return false;
+    }
     if (selectedClassId !== 'all') {
       const targetCls = db.classes.find((c) => c.id === selectedClassId);
       const isMatch =
         s.currentClassId === selectedClassId ||
-        s.currentClassId.toLowerCase() === selectedClassId.toLowerCase() ||
-        (targetCls && (s.currentClassId === targetCls.name || s.currentClassId.toLowerCase() === targetCls.name.toLowerCase()));
+        s.currentClassId?.toLowerCase() === selectedClassId?.toLowerCase() ||
+        (targetCls && (
+          s.currentClassId === targetCls.name ||
+          s.currentClassId?.toLowerCase() === targetCls.name?.toLowerCase() ||
+          s.currentClassId?.toLowerCase() === `lớp ${targetCls.name.toLowerCase()}` ||
+          (targetCls.customTeacherName && s.currentClassId?.toLowerCase().includes('vy') && targetCls.customTeacherName.toLowerCase().includes('vy'))
+        ));
       if (!isMatch) return false;
     }
     if (selectedGradeId !== 'all' && s.currentGradeId && s.currentGradeId !== selectedGradeId) return false;

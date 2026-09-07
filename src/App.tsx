@@ -16,6 +16,8 @@ import { AuditLogView } from './components/AuditLogView';
 import { SettingsView } from './components/SettingsView';
 import { MonthlyFeedbackView } from './components/MonthlyFeedbackView';
 import { SubjectClassesView } from './components/SubjectClassesView';
+import { ParentsView } from './components/ParentsView';
+import { AnalyticsView } from './components/AnalyticsView';
 import { OwnerPermissionModal } from './components/OwnerPermissionModal';
 import { ImportWizardModal } from './components/ImportWizardModal';
 import { StudentProfileModal } from './components/StudentProfileModal';
@@ -192,13 +194,35 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'reports' && <ReportsExportView />}
+            {activeTab === 'parents' && (
+              <ParentsView
+                onNavigate={handleNavigate}
+                onOpenOwnerModal={handleOpenOwnerModal}
+              />
+            )}
+
+            {activeTab === 'analytics' && (
+              <AnalyticsView onNavigate={handleNavigate} />
+            )}
+
+            {(activeTab === 'reports' || activeTab === 'export') && <ReportsExportView />}
+
+            {activeTab === 'import' && (
+              <StudentsView
+                initialClassId={tabParams.classId}
+                onSelectStudent={handleOpenProfile}
+                onOpenImportModal={handleOpenImport}
+                onOpenOwnerModal={handleOpenOwnerModal}
+                searchQuery={searchQuery}
+                autoOpenImport={true}
+              />
+            )}
 
             {activeTab === 'audit' && (
               <AuditLogView onOpenOwnerModal={handleOpenOwnerModal} />
             )}
 
-            {activeTab === 'settings' && (
+            {(activeTab === 'settings' || activeTab === 'backup') && (
               <SettingsView onOpenOwnerModal={handleOpenOwnerModal} />
             )}
           </div>
