@@ -1,0 +1,6 @@
+{
+  "name": "Trường Tiểu học Nam Phước - Phân hiệu 2 Duy Phước 2",
+  "description": "Smart Student Manager – Hệ thống quản lý học sinh Trường Tiểu học Nam Phước Phân hiệu 2 Duy Phước 2 (Bản quyền sở hữu: Thanh Nguyễn).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

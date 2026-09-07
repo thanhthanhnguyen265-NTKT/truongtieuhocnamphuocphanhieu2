@@ -1,0 +1,217 @@
+import {
+  SchoolYear,
+  Grade,
+  ClassRoom,
+  Teacher,
+  Student,
+  StudentYearHistory,
+  AttendanceRecord,
+  FeedbackRecord,
+  EvaluationRecord,
+  CompetitionCriterion,
+  CompetitionTransaction,
+} from '../types';
+
+export const INITIAL_SCHOOL_YEARS: SchoolYear[] = [
+  {
+    id: 'SY2024_2025',
+    name: '2024–2025',
+    startDate: '2024-09-05',
+    endDate: '2025-05-31',
+    isCurrent: false,
+    status: 'archived',
+    notes: 'Năm học lưu trữ lịch sử',
+  },
+  {
+    id: 'SY2025_2026',
+    name: '2025–2026',
+    startDate: '2025-09-05',
+    endDate: '2026-05-31',
+    isCurrent: false,
+    status: 'archived',
+    notes: 'Năm học trước - đã tổng kết học bạ',
+  },
+  {
+    id: 'SY2026_2027',
+    name: '2026–2027',
+    startDate: '2026-09-05',
+    endDate: '2027-05-31',
+    isCurrent: true,
+    status: 'active',
+    notes: 'Năm học hiện tại đang diễn ra',
+  },
+  {
+    id: 'SY2027_2028',
+    name: '2027–2028',
+    startDate: '2027-09-05',
+    endDate: '2028-05-31',
+    isCurrent: false,
+    status: 'active',
+    notes: 'Năm học dự kiến kế tiếp',
+  },
+];
+
+export const INITIAL_GRADES: Grade[] = [
+  { id: 'G1', level: 1, name: 'Khối 1' },
+  { id: 'G2', level: 2, name: 'Khối 2' },
+  { id: 'G3', level: 3, name: 'Khối 3' },
+  { id: 'G4', level: 4, name: 'Khối 4' },
+  { id: 'G5', level: 5, name: 'Khối 5' },
+];
+
+export const INITIAL_TEACHERS: Teacher[] = [
+  {
+    id: 'T001',
+    fullName: 'Thanh Nguyễn',
+    email: 'thanhthanhnguyen265@gmail.com',
+    phone: '0905 123 456',
+    role: 'admin',
+    isOwner: true,
+    assignedClassIds: ['C1A', 'C1B', 'C2A', 'C2B', 'C3A', 'C3B', 'C4A', 'C4B', 'C5A', 'C5B'],
+    subjects: ['Ban Giám Hiệu', 'Quản trị hệ thống'],
+    permissions: {
+      view: true,
+      create: true,
+      edit: true,
+      delete: true,
+      export: true,
+      import: true,
+      attendance: true,
+      feedback: true,
+      competition: true,
+    },
+  },
+  {
+    id: 'T002',
+    fullName: 'Cô Nguyễn Thị Mai',
+    email: 'nguyenthimai@namphuoc.edu.vn',
+    phone: '0912 345 678',
+    role: 'homeroom',
+    assignedClassIds: ['C4A'],
+    subjects: ['GVCN Lớp 4A', 'Toán', 'Tiếng Việt', 'Đạo đức', 'TN&XH'],
+    permissions: {
+      view: true,
+      create: true,
+      edit: true,
+      delete: false,
+      export: true,
+      import: true,
+      attendance: true,
+      feedback: true,
+      competition: true,
+    },
+  },
+  {
+    id: 'T003',
+    fullName: 'Thầy Trần Văn Nam',
+    email: 'tranvannam@namphuoc.edu.vn',
+    phone: '0934 567 890',
+    role: 'homeroom',
+    assignedClassIds: ['C4B'],
+    subjects: ['GVCN Lớp 4B', 'Toán', 'Tiếng Việt', 'Lịch sử - Địa lý'],
+    permissions: {
+      view: true,
+      create: true,
+      edit: true,
+      delete: false,
+      export: true,
+      import: true,
+      attendance: true,
+      feedback: true,
+      competition: true,
+    },
+  },
+  {
+    id: 'T004',
+    fullName: 'Thầy Trần Anh Tuấn',
+    email: 'tran.anhtuan.eng@namphuoc.edu.vn',
+    phone: '0978 901 234',
+    role: 'subject',
+    assignedClassIds: ['C3A', 'C3B', 'C4A', 'C4B', 'C5A', 'C5B'],
+    subjects: ['Tiếng Anh'],
+    permissions: {
+      view: true,
+      create: false,
+      edit: false,
+      delete: false,
+      export: true,
+      import: false,
+      attendance: false,
+      feedback: true,
+      competition: true,
+    },
+  },
+  {
+    id: 'T005',
+    fullName: 'Cô Lê Thu Hà',
+    email: 'lethuha.music@namphuoc.edu.vn',
+    phone: '0988 777 666',
+    role: 'subject',
+    assignedClassIds: ['C1A', 'C1B', 'C2A', 'C2B', 'C3A', 'C3B', 'C4A', 'C4B', 'C5A', 'C5B'],
+    subjects: ['Âm nhạc'],
+    permissions: {
+      view: true,
+      create: false,
+      edit: false,
+      delete: false,
+      export: true,
+      import: false,
+      attendance: false,
+      feedback: true,
+      competition: true,
+    },
+  },
+  {
+    id: 'T006',
+    fullName: 'Thầy Phạm Đình Trọng',
+    email: 'phamdinh.tin@namphuoc.edu.vn',
+    phone: '0905 444 888',
+    role: 'subject',
+    assignedClassIds: ['C3A', 'C3B', 'C4A', 'C4B', 'C5A', 'C5B'],
+    subjects: ['Tin học & Công nghệ'],
+    permissions: {
+      view: true,
+      create: false,
+      edit: false,
+      delete: false,
+      export: true,
+      import: false,
+      attendance: false,
+      feedback: true,
+      competition: true,
+    },
+  },
+];
+
+export const INITIAL_CLASSES: ClassRoom[] = [
+  { id: 'C1A', name: '1A', gradeId: 'G1', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Thầy Nguyễn Văn Nam', avatarThemeId: 'rabbit', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.101', notes: 'Lớp Thỏ Trắng Thông Thái' },
+  { id: 'C1B', name: '1B', gradeId: 'G1', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Lê Thị Vy', avatarThemeId: 'cat', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.102', notes: 'Lớp Cô Lê Thị Vy' },
+  { id: 'C2A', name: '2A', gradeId: 'G2', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Trần Thị Hương', avatarThemeId: 'puppy', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.201', notes: 'Lớp Cún Con Vui Vẻ' },
+  { id: 'C2B', name: '2B', gradeId: 'G2', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Thầy Phạm Văn Kiên', avatarThemeId: 'squirrel', subjectTeacherIds: ['T004', 'T005'], roomNumber: 'P.202', notes: 'Lớp Sóc Nâu Nhanh Nhẹn' },
+  { id: 'C3A', name: '3A', gradeId: 'G3', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Hoàng Thu Thảo', avatarThemeId: 'sunflower', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.301', notes: 'Lớp Hoa Hướng Dương' },
+  { id: 'C3B', name: '3B', gradeId: 'G3', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Thầy Ngô Kiến Huy', avatarThemeId: 'bee', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.302', notes: 'Lớp Ong Vàng Cần Mẫn' },
+  { id: 'C4A', name: '4A', gradeId: 'G4', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T002', customTeacherName: 'Cô Nguyễn Thị Mai', avatarThemeId: 'panda', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.401', notes: 'Lớp Gấu Trúc Đáng Yêu - Xuất sắc' },
+  { id: 'C4B', name: '4B', gradeId: 'G4', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T003', customTeacherName: 'Thầy Trần Văn Nam', avatarThemeId: 'lotus', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.402', notes: 'Lớp Hoa Sen Hồng' },
+  { id: 'C5A', name: '5A', gradeId: 'G5', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Thầy Vũ Đình Toàn', avatarThemeId: 'bird', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.501', notes: 'Lớp Sơn Ca Hót Vang' },
+  { id: 'C5B', name: '5B', gradeId: 'G5', schoolYearId: 'SY2026_2027', homeroomTeacherId: 'T001', customTeacherName: 'Cô Bùi Kim Ngân', avatarThemeId: 'butterfly', subjectTeacherIds: ['T004', 'T005', 'T006'], roomNumber: 'P.502', notes: 'Lớp Bướm Xinh Rực Rỡ' },
+];
+
+export function generateCompleteRoster(): {
+  students: Student[];
+  studentHistory: StudentYearHistory[];
+  attendance: AttendanceRecord[];
+  transactions: CompetitionTransaction[];
+  evaluations: EvaluationRecord[];
+  feedback: FeedbackRecord[];
+} {
+  // Cleared 270 sample students per user request:
+  // "xóa hết danh sách 270 học sinh mẫu có sẵn, chỉ hiển thị khi danh sách học sinh được cập nhật theo từng lớp lên hệ thống app"
+  return {
+    students: [],
+    studentHistory: [],
+    attendance: [],
+    transactions: [],
+    evaluations: [],
+    feedback: [],
+  };
+}

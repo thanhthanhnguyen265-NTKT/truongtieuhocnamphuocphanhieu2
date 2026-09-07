@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "SchoolYear": {
+      "path": "schoolYears/{schoolYearId}",
+      "fields": {
+        "name": "string",
+        "startDate": "string",
+        "endDate": "string",
+        "isCurrent": "boolean",
+        "status": "string",
+        "notes": "string"
+      }
+    },
+    "Grade": {
+      "path": "grades/{gradeId}",
+      "fields": {
+        "level": "number",
+        "name": "string"
+      }
+    },
+    "ClassRoom": {
+      "path": "classes/{classId}",
+      "fields": {
+        "name": "string",
+        "gradeId": "string",
+        "schoolYearId": "string",
+        "homeroomTeacherId": "string",
+        "customTeacherName": "string",
+        "avatarThemeId": "string",
+        "subjectTeacherIds": "array",
+        "roomNumber": "string"
+      }
+    },
+    "Teacher": {
+      "path": "teachers/{teacherId}",
+      "fields": {
+        "fullName": "string",
+        "email": "string",
+        "phone": "string",
+        "role": "string",
+        "assignedClassIds": "array",
+        "subjects": "array",
+        "permissions": "map"
+      }
+    },
+    "Student": {
+      "path": "students/{studentId}",
+      "fields": {
+        "studentCode": "string",
+        "fullName": "string",
+        "gender": "string",
+        "dateOfBirth": "string",
+        "address": "string",
+        "parentName": "string",
+        "parentPhone": "string",
+        "currentClassId": "string",
+        "currentGradeId": "string",
+        "currentSchoolYearId": "string"
+      }
+    },
+    "AttendanceRecord": {
+      "path": "attendance/{attendanceId}",
+      "fields": {
+        "studentId": "string",
+        "classId": "string",
+        "schoolYearId": "string",
+        "date": "string",
+        "status": "string",
+        "note": "string",
+        "teacherId": "string"
+      }
+    },
+    "FeedbackRecord": {
+      "path": "feedback/{feedbackId}",
+      "fields": {
+        "studentId": "string",
+        "classId": "string",
+        "teacherId": "string",
+        "teacherName": "string",
+        "schoolYearId": "string",
+        "semester": "string",
+        "subject": "string",
+        "category": "string",
+        "rating": "string",
+        "content": "string",
+        "date": "string"
+      }
+    },
+    "EvaluationRecord": {
+      "path": "evaluations/{evaluationId}",
+      "fields": {
+        "studentId": "string",
+        "classId": "string",
+        "schoolYearId": "string",
+        "teacherId": "string",
+        "teacherName": "string",
+        "subject": "string",
+        "level": "string",
+        "semester": "string",
+        "notes": "string"
+      }
+    },
+    "CompetitionTransaction": {
+      "path": "transactions/{transactionId}",
+      "fields": {
+        "studentId": "string",
+        "classId": "string",
+        "schoolYearId": "string",
+        "criterionId": "string",
+        "criterionName": "string",
+        "type": "string",
+        "points": "number",
+        "date": "string",
+        "note": "string",
+        "teacherName": "string"
+      }
+    },
+    "AuditLog": {
+      "path": "auditLogs/{logId}",
+      "fields": {
+        "timestamp": "string",
+        "performedBy": "string",
+        "action": "string",
+        "category": "string",
+        "details": "string",
+        "status": "string"
+      }
+    }
+  }
+}
