@@ -14,6 +14,7 @@ import { FeedbackView } from './components/FeedbackView';
 import { ReportsExportView } from './components/ReportsExportView';
 import { AuditLogView } from './components/AuditLogView';
 import { SettingsView } from './components/SettingsView';
+import { BackupRestoreView } from './components/BackupRestoreView';
 import { MonthlyFeedbackView } from './components/MonthlyFeedbackView';
 import { SubjectClassesView } from './components/SubjectClassesView';
 import { ParentsView } from './components/ParentsView';
@@ -222,8 +223,12 @@ export default function App() {
               <AuditLogView onOpenOwnerModal={handleOpenOwnerModal} />
             )}
 
-            {(activeTab === 'settings' || activeTab === 'backup') && (
+            {activeTab === 'settings' && (
               <SettingsView onOpenOwnerModal={handleOpenOwnerModal} />
+            )}
+
+            {activeTab === 'backup' && (
+              <BackupRestoreView onOpenOwnerModal={handleOpenOwnerModal} />
             )}
           </div>
         </main>

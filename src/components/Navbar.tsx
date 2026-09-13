@@ -139,6 +139,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               <>
                 <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
                 <span className="text-emerald-100 font-medium">Đã tự động lưu lúc {lastSavedTime}</span>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate('backup')}
+                    className="ml-1 text-[10px] underline text-sky-200 hover:text-white cursor-pointer"
+                    title="Mở Trung tâm Sao lưu & Khôi phục dữ liệu"
+                  >
+                    (Xem sao lưu)
+                  </button>
+                )}
               </>
             )}
           </div>

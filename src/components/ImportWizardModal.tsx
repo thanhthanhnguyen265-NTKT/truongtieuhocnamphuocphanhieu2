@@ -17,7 +17,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { storage } from '../services/storage';
+import { storage, normalizeStudentAddress } from '../services/storage';
 import { Student } from '../types';
 import { downloadSampleExcelTemplate } from '../services/excelExport';
 
@@ -45,6 +45,54 @@ interface ParsedStudentRow {
   error?: string;
 }
 
+// Helpers for robust parsing of dates and genders from Excel/CSV
+function parseExcelDate(val: any): string {
+  if (!val) return '2016-05-15';
+  if (typeof val === 'number') {
+    // Excel numeric date serial
+    const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+    if (!isNaN(date.getTime())) {
+      const y = date.getUTCFullYear();
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(date.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+  const str = String(val).trim();
+  // Match DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dmyMatch) {
+    const d = dmyMatch[1].padStart(2, '0');
+    const m = dmyMatch[2].padStart(2, '0');
+    const y = dmyMatch[3];
+    return `${y}-${m}-${d}`;
+  }
+  // Match YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+  // Match YYYY only
+  if (/^\d{4}$/.test(str)) {
+    return `${str}-01-01`;
+  }
+  return '2016-05-15';
+}
+
+function parseGender(val: any, femaleVal?: any): 'Nam' | 'Nữ' {
+  if (femaleVal !== undefined && femaleVal !== null && femaleVal !== '') {
+    const fStr = String(femaleVal).trim().toLowerCase();
+    if (fStr === 'x' || fStr === '1' || fStr === 'nữ' || fStr === 'nu' || fStr === 'v' || fStr === 'yes' || fStr === 'true') {
+      return 'Nữ';
+    }
+  }
+  if (!val) return 'Nam';
+  const s = String(val).trim().toLowerCase();
+  if (s.includes('nữ') || s.includes('nu') || s === 'female' || s === 'f' || s === 'gái') {
+    return 'Nữ';
+  }
+  return 'Nam';
+}
+
 export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   isOpen,
   onClose,
@@ -58,7 +106,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const [selectedClass, setSelectedClass] = useState<string>(
     targetClassId || db.classes[0]?.id || 'C4A'
   );
-  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('replace');
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
 
   // Sync selectedClass whenever modal opens or targetClassId changes
@@ -90,58 +138,76 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const parsePasteInput = () => {
     if (!pasteText.trim()) return;
 
-    const lines = pasteText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    const existingCodes = new Set(db.students.map((s) => s.studentCode));
-    let nextNum = db.students.length + 1;
+    const rawLines = pasteText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+    const targetClass = db.classes.find((c) => c.id === selectedClass) || db.classes[0];
 
-    const rows: ParsedStudentRow[] = lines.map((line, idx) => {
-      // Check if line contains tabs or commas
+    const rows: ParsedStudentRow[] = [];
+    let validCounter = 0;
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+
+      // Skip header lines like "STT | Họ và tên | Giới tính..."
+      if (/^stt|^họ\s*và\s*tên|^họ\s*tên|^danh\s*sách|^stt\t/i.test(line)) {
+        continue;
+      }
+
+      // Check delimiters
       const isTab = line.includes('\t');
       const isComma = line.includes(',');
-      const parts = isTab ? line.split('\t') : isComma ? line.split(',') : [line];
+      const isSemi = line.includes(';');
+      const isPipe = line.includes('|');
+
+      let parts: string[] = [];
+      if (isTab) parts = line.split('\t');
+      else if (isPipe) parts = line.split('|');
+      else if (isSemi) parts = line.split(';');
+      else if (isComma) parts = line.split(',');
+      else parts = [line];
+
+      parts = parts.map((p) => p.trim());
 
       let fullName = '';
       let gender: 'Nam' | 'Nữ' = 'Nam';
       let dateOfBirth = '2016-05-15';
-      let address = 'Xã Duy Phước, Huyện Duy Xuyên';
+      let address = 'Xã Nam Phước';
       let parentName = '';
       let parentPhone = '';
-      let studentCode = `HS${nextNum.toString().padStart(4, '0')}`;
 
       if (parts.length === 1) {
-        // Just name e.g. "Nguyễn Văn An"
-        fullName = parts[0].trim();
+        // Just name e.g. "Nguyễn Văn An" or "1. Nguyễn Văn An"
+        fullName = parts[0].replace(/^\d+[\.\/\-\s]+/, '').trim();
       } else if (parts.length >= 2) {
-        // Example: STT | Ho ten | Gioi tinh | Ngay sinh ...
-        // Check if first column is index
-        const firstIsIndex = !isNaN(Number(parts[0].trim()));
-        if (firstIsIndex && parts.length > 2) {
-          fullName = parts[1].trim();
-          if (parts[2]) {
-            const g = parts[2].trim().toLowerCase();
-            if (g === 'nữ' || g === 'nu' || g === 'female' || g === 'f') gender = 'Nữ';
-          }
-          if (parts[3]) dateOfBirth = parts[3].trim();
-          if (parts[4]) address = parts[4].trim();
-          if (parts[5]) parentPhone = parts[5].trim();
-        } else {
-          fullName = parts[0].trim();
-          if (parts[1]) {
-            const g = parts[1].trim().toLowerCase();
-            if (g === 'nữ' || g === 'nu' || g === 'female' || g === 'f') gender = 'Nữ';
-          }
-          if (parts[2]) dateOfBirth = parts[2].trim();
-          if (parts[3]) address = parts[3].trim();
+        // Check if first column is an index (STT)
+        const firstIsIndex = !isNaN(Number(parts[0]));
+        const namePart = firstIsIndex ? parts[1] : parts[0];
+        fullName = namePart.replace(/^\d+[\.\/\-\s]+/, '').trim();
+
+        const offset = firstIsIndex ? 1 : 0;
+        if (parts[offset + 1]) {
+          gender = parseGender(parts[offset + 1]);
+        }
+        if (parts[offset + 2]) {
+          dateOfBirth = parseExcelDate(parts[offset + 2]);
+        }
+        if (parts[offset + 3]) {
+          address = normalizeStudentAddress(parts[offset + 3]);
+        }
+        if (parts[offset + 4]) {
+          parentName = parts[offset + 4].trim();
+        }
+        if (parts[offset + 5]) {
+          parentPhone = parts[offset + 5].trim();
         }
       }
 
-      nextNum++;
+      if (!fullName || fullName.length < 2) continue;
 
-      const isValid = fullName.length >= 2;
-      const error = !isValid ? 'Thiếu họ và tên học sinh' : undefined;
+      validCounter++;
+      const studentCode = `HS${targetClass.name.replace(/\s+/g, '')}_${validCounter.toString().padStart(2, '0')}`;
 
-      return {
-        index: idx + 1,
+      rows.push({
+        index: validCounter,
         studentCode,
         fullName,
         gender,
@@ -149,10 +215,16 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         address,
         parentName,
         parentPhone,
-        isValid,
-        error,
-      };
-    });
+        classId: selectedClass,
+        className: targetClass.name,
+        isValid: true,
+      });
+    }
+
+    if (rows.length === 0) {
+      alert('Không tìm thấy họ tên học sinh hợp lệ trong văn bản dán.');
+      return;
+    }
 
     setParsedRows(rows);
     setStep(3);
@@ -170,65 +242,152 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         const workbook = XLSX.read(data, { type: 'binary' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        const json = XLSX.utils.sheet_to_json<any>(worksheet);
 
-        let nextNum = db.students.length + 1;
-        const rows: ParsedStudentRow[] = json.map((row: any, idx: number) => {
-          // Flexible Vietnamese column mapping
-          const fullName =
-            row['Họ và tên'] ||
-            row['Họ và Tên'] ||
-            row['Họ tên'] ||
-            row['Họ và tên học sinh'] ||
-            row['Full Name'] ||
-            row['Name'] ||
-            '';
+        // 1. Get raw 2D array of rows
+        const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
 
-          const studentCode =
-            row['Mã học sinh'] ||
-            row['Mã HS'] ||
-            row['Ma HS'] ||
-            row['Student Code'] ||
-            `HS${nextNum.toString().padStart(4, '0')}`;
+        if (!rawRows || rawRows.length === 0) {
+          alert('Tệp Excel trống hoặc không đọc được dữ liệu.');
+          return;
+        }
 
-          const rawGender = String(row['Giới tính'] || row['Giới Tính'] || row['Gender'] || 'Nam').toLowerCase();
-          const gender: 'Nam' | 'Nữ' = rawGender.includes('nữ') || rawGender === 'f' || rawGender === 'female' ? 'Nữ' : 'Nam';
+        // 2. Locate header row
+        let headerIdx = -1;
+        let fullNameCol = -1;
+        let lastNameCol = -1;
+        let firstNameCol = -1;
+        let codeCol = -1;
+        let dobCol = -1;
+        let genderCol = -1;
+        let femaleCol = -1;
+        let addressCol = -1;
+        let parentCol = -1;
+        let phoneCol = -1;
+        let emailCol = -1;
+        let notesCol = -1;
 
-          const dateOfBirth = String(row['Ngày sinh'] || row['Ngày Sinh'] || row['DOB'] || '2016-05-15');
-          const address = String(row['Địa chỉ'] || row['Địa Chỉ'] || row['Address'] || 'Xã Duy Phước');
-          const parentName = String(row['Họ tên phụ huynh'] || row['Phụ huynh'] || row['Parent'] || '');
-          const parentPhone = String(row['Số điện thoại'] || row['SĐT'] || row['Phone'] || '');
-          const parentEmail = String(row['Email'] || '');
-          const notes = String(row['Ghi chú'] || '');
+        const isHeaderLike = (cell: string) => {
+          const c = cell.toLowerCase().trim();
+          return (
+            /họ\s*(và|&)?\s*tên|họ\s*tên|full\s*name/i.test(c) ||
+            /họ\s*(và|&)?\s*(tên\s*đệm|chữ\s*đệm|đệm|lót)|^họ$/i.test(c) ||
+            /^tên$|^tên\s*gọi$/i.test(c) ||
+            /ngày\s*sinh|năm\s*sinh|dob|sinh\s*ngày/i.test(c) ||
+            /mã\s*(hs|học\s*sinh|định\s*danh|số)|student\s*code/i.test(c) ||
+            /giới\s*tính|gender/i.test(c) ||
+            /^nữ$/i.test(c) ||
+            /địa\s*chỉ|thường\s*trú|nơi\s*ở|chỗ\s*ở/i.test(c)
+          );
+        };
 
-          // Check if row specifies a class (e.g. "1B", "Lớp 1B", "Cô Lê Thị Vy")
-          const classInRow = String(
-            row['Lớp'] || row['Lớp học'] || row['Tên lớp'] || row['Class'] || row['GVCN'] || ''
-          ).trim();
-          let rowClassId = selectedClass;
-          let rowClassName = '';
-          if (classInRow) {
-            const matchedCls = db.classes.find(
-              (c) =>
-                c.id.toLowerCase() === classInRow.toLowerCase() ||
-                c.name.toLowerCase() === classInRow.toLowerCase() ||
-                `lớp ${c.name.toLowerCase()}` === classInRow.toLowerCase() ||
-                classInRow.toLowerCase().includes(c.name.toLowerCase()) ||
-                (c.customTeacherName && classInRow.toLowerCase().includes(c.customTeacherName.toLowerCase()))
-            );
-            if (matchedCls) {
-              rowClassId = matchedCls.id;
-              rowClassName = matchedCls.name;
+        // Scan rows 0 to min(25, rawRows.length - 1)
+        for (let r = 0; r < Math.min(25, rawRows.length); r++) {
+          const row = rawRows[r];
+          if (!Array.isArray(row)) continue;
+          const matchCount = row.filter((cell) => typeof cell === 'string' && isHeaderLike(cell)).length;
+          if (matchCount >= 2 || (matchCount >= 1 && row.some((c) => /stt|họ\s*tên|họ\s*và\s*tên/i.test(String(c))))) {
+            headerIdx = r;
+            break;
+          }
+        }
+
+        // Map column indices from header row
+        if (headerIdx >= 0) {
+          const headerRow = rawRows[headerIdx];
+          headerRow.forEach((cellVal, colIdx) => {
+            const c = String(cellVal || '').toLowerCase().trim();
+            if (/họ\s*(và|&)?\s*tên|họ\s*tên|full\s*name|tên\s*học\s*sinh/i.test(c)) fullNameCol = colIdx;
+            else if (/họ\s*(và|&)?\s*(tên\s*đệm|chữ\s*đệm|đệm|lót)|^họ$/i.test(c)) lastNameCol = colIdx;
+            else if (/^tên$|^tên\s*gọi$/i.test(c) || (/tên/i.test(c) && !/họ|trường|lớp|cha|mẹ/i.test(c))) firstNameCol = colIdx;
+            else if (/mã\s*(hs|học\s*sinh|định\s*danh|số)|student\s*code|^mã$/i.test(c)) codeCol = colIdx;
+            else if (/ngày\s*sinh|năm\s*sinh|dob|sinh\s*ngày/i.test(c)) dobCol = colIdx;
+            else if (/giới\s*tính|gender|nam\s*\/?\s*nữ/i.test(c)) genderCol = colIdx;
+            else if (/^nữ$|^gái$/i.test(c)) femaleCol = colIdx;
+            else if (/địa\s*chỉ|thường\s*trú|nơi\s*ở|chỗ\s*ở|quê\s*quán|hộ\s*khẩu|address/i.test(c)) addressCol = colIdx;
+            else if (/phụ\s*huynh|cha\s*mẹ|họ\s*tên\s*cha|họ\s*tên\s*mẹ|người\s*giám\s*hộ|parent/i.test(c)) parentCol = colIdx;
+            else if (/điện\s*thoại|sđt|số\s*đt|phone|liên\s*hệ/i.test(c)) phoneCol = colIdx;
+            else if (/email|thư\s*điện\s*tử/i.test(c)) emailCol = colIdx;
+            else if (/ghi\s*chú|note|khuyết\s*tật/i.test(c)) notesCol = colIdx;
+          });
+        }
+
+        // Start processing rows after header, or from row 0 if no header found
+        const startRow = headerIdx >= 0 ? headerIdx + 1 : 0;
+        const targetClass = db.classes.find((c) => c.id === selectedClass) || db.classes[0];
+        const parsed: ParsedStudentRow[] = [];
+        let validCounter = 0;
+
+        for (let r = startRow; r < rawRows.length; r++) {
+          const row = rawRows[r];
+          if (!Array.isArray(row) || row.length === 0) continue;
+
+          // Check if row has any content
+          const hasAnyContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
+          if (!hasAnyContent) continue;
+
+          // Skip summary / footer rows
+          const firstCellStr = String(row[0] || '').toLowerCase().trim();
+          const secondCellStr = String(row[1] || '').toLowerCase().trim();
+          if (
+            firstCellStr.includes('tổng số') ||
+            firstCellStr.includes('tổng cộng') ||
+            firstCellStr.includes('giáo viên') ||
+            firstCellStr.includes('hiệu trưởng') ||
+            firstCellStr.includes('người lập') ||
+            (firstCellStr.includes('ngày') && firstCellStr.includes('tháng')) ||
+            secondCellStr.includes('tổng số') ||
+            secondCellStr.includes('tổng cộng')
+          ) {
+            continue;
+          }
+
+          let fullName = '';
+          if (fullNameCol >= 0 && row[fullNameCol]) {
+            fullName = String(row[fullNameCol]).trim();
+          } else if (lastNameCol >= 0 && firstNameCol >= 0) {
+            fullName = `${String(row[lastNameCol] || '').trim()} ${String(row[firstNameCol] || '').trim()}`.trim();
+          } else {
+            // Fallback: find first cell that has 2+ words (typical Vietnamese name)
+            for (let c = 0; c < Math.min(row.length, 5); c++) {
+              const val = String(row[c] || '').trim();
+              if (val.split(/\s+/).length >= 2 && !/^\d+$/.test(val) && !/nam|nữ/i.test(val)) {
+                fullName = val;
+                break;
+              }
             }
           }
 
-          nextNum++;
-          const isValid = String(fullName).trim().length >= 2;
+          // Strip leading numbering like "1. Nguyễn Văn An"
+          fullName = fullName.replace(/^\d+[\.\/\-\s]+/, '').trim();
 
-          return {
-            index: idx + 1,
-            studentCode: String(studentCode).trim(),
-            fullName: String(fullName).trim(),
+          if (!fullName || fullName.length < 2) {
+            continue; // Skip non-student rows
+          }
+
+          validCounter++;
+
+          let studentCode = codeCol >= 0 && row[codeCol] ? String(row[codeCol]).trim() : '';
+          if (!studentCode) {
+            studentCode = `HS${targetClass.name.replace(/\s+/g, '')}_${validCounter.toString().padStart(2, '0')}`;
+          }
+
+          const gender = parseGender(
+            genderCol >= 0 ? row[genderCol] : undefined,
+            femaleCol >= 0 ? row[femaleCol] : undefined
+          );
+
+          const dateOfBirth = parseExcelDate(dobCol >= 0 ? row[dobCol] : undefined);
+          const rawAddress = addressCol >= 0 && row[addressCol] ? String(row[addressCol]) : '';
+          const address = normalizeStudentAddress(rawAddress);
+          const parentName = parentCol >= 0 && row[parentCol] ? String(row[parentCol]).trim() : '';
+          const parentPhone = phoneCol >= 0 && row[phoneCol] ? String(row[phoneCol]).trim() : '';
+          const parentEmail = emailCol >= 0 && row[emailCol] ? String(row[emailCol]).trim() : '';
+          const notes = notesCol >= 0 && row[notesCol] ? String(row[notesCol]).trim() : '';
+
+          parsed.push({
+            index: validCounter,
+            studentCode,
+            fullName,
             gender,
             dateOfBirth,
             address,
@@ -236,14 +395,18 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             parentPhone,
             parentEmail,
             notes,
-            classId: rowClassId,
-            className: rowClassName,
-            isValid,
-            error: !isValid ? 'Dòng thiếu họ tên học sinh' : undefined,
-          };
-        });
+            classId: selectedClass,
+            className: targetClass.name,
+            isValid: true,
+          });
+        }
 
-        setParsedRows(rows);
+        if (parsed.length === 0) {
+          alert('Không tìm thấy danh sách học sinh hợp lệ trong tệp Excel. Vui lòng kiểm tra lại cột Họ và tên.');
+          return;
+        }
+
+        setParsedRows(parsed);
         setStep(3);
       } catch (err: any) {
         alert(`Lỗi đọc tệp Excel/CSV: ${err.message}`);
@@ -252,7 +415,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     reader.readAsBinaryString(file);
   };
 
-  // Execute Import
+  // Execute Import: Đảm bảo tải lớp nào thì giữ nguyên số lượng và danh sách lớp đó, lớp khác không bị ảnh hưởng!
   const handleExecuteImport = () => {
     if (!isAllowedToImport) {
       onOpenOwnerModal('Nhập danh sách học sinh');
@@ -265,83 +428,129 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
       return;
     }
 
-    const targetClass = db.classes.find((c) => c.id === selectedClass);
+    const targetClass = db.classes.find((c) => c.id === selectedClass) || db.classes[0];
+
+    // Check if a student belongs to target class
+    const isStudentInTargetClass = (s: Student) => {
+      if (!s) return false;
+      if (s.currentClassId === targetClass.id) return true;
+      if (s.currentClassId?.toLowerCase() === targetClass.name.toLowerCase()) return true;
+      if (s.currentClassId?.toLowerCase() === `lớp ${targetClass.name.toLowerCase()}`) return true;
+      return false;
+    };
+
+    // Keep all students in other classes 100% untouched and preserved
+    const otherClassesStudents = db.students.filter((s) => !isStudentInTargetClass(s));
+    const currentClassStudents = db.students.filter((s) => isStudentInTargetClass(s));
+
+    let finalClassStudents: Student[] = [];
     let added = 0;
     let updatedCount = 0;
-    let skipped = parsedRows.length - validRows.length;
-
-    let newStudentsList = [...db.students];
 
     if (importMode === 'replace') {
-      // Remove current students in this class
-      newStudentsList = newStudentsList.filter(
-        (s) => !(s.currentClassId === selectedClass && (s.currentSchoolYearId === db.currentSchoolYearId || s.currentSchoolYearId === 'SY2026_2027'))
-      );
-    }
-
-    validRows.forEach((row) => {
-      const stuClassId = row.classId || selectedClass;
-      const stuClass = db.classes.find((c) => c.id === stuClassId) || targetClass;
-
-      const existingIdx = newStudentsList.findIndex(
-        (s) =>
-          s.studentCode.trim().toLowerCase() === row.studentCode.trim().toLowerCase() ||
-          (s.fullName.trim().toLowerCase() === row.fullName.trim().toLowerCase() && (s.currentClassId === stuClassId || s.currentClassId === stuClass?.name))
-      );
-
-      if (existingIdx >= 0 && importMode === 'merge') {
-        newStudentsList[existingIdx] = {
-          ...newStudentsList[existingIdx],
-          fullName: row.fullName,
+      // REPLACE MODE: Giữ nguyên chính xác số lượng và danh sách tải lên cho lớp này
+      finalClassStudents = validRows.map((row, idx) => {
+        let code = row.studentCode?.trim();
+        if (!code) {
+          code = `HS${targetClass.name.replace(/\s+/g, '')}_${(idx + 1).toString().padStart(2, '0')}`;
+        }
+        return {
+          id: `STU_${targetClass.id}_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+          studentCode: code,
+          fullName: row.fullName.trim(),
           gender: row.gender,
           dateOfBirth: row.dateOfBirth,
-          address: row.address,
-          parentName: row.parentName || newStudentsList[existingIdx].parentName,
-          parentPhone: row.parentPhone || newStudentsList[existingIdx].parentPhone,
-          currentClassId: stuClassId,
-          currentGradeId: stuClass?.gradeId || newStudentsList[existingIdx].currentGradeId,
-          updatedAt: new Date().toISOString(),
-        };
-        updatedCount++;
-      } else {
-        const newStu: Student = {
-          id: `STU_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          studentCode: row.studentCode,
-          fullName: row.fullName,
-          gender: row.gender,
-          dateOfBirth: row.dateOfBirth,
-          address: row.address,
-          parentName: row.parentName,
-          parentPhone: row.parentPhone,
-          parentEmail: row.parentEmail,
-          currentClassId: stuClassId,
-          currentGradeId: stuClass?.gradeId || targetClass?.gradeId || 'G1',
+          address: normalizeStudentAddress(row.address),
+          parentName: (row.parentName || '').trim(),
+          parentPhone: (row.parentPhone || '').trim(),
+          parentEmail: (row.parentEmail || '').trim(),
+          currentClassId: targetClass.id,
+          currentGradeId: targetClass.gradeId || 'G1',
           currentSchoolYearId: db.currentSchoolYearId || 'SY2026_2027',
-          notes: row.notes,
+          notes: (row.notes || '').trim(),
+          chibiAvatarId: row.gender === 'Nữ' ? `chibi-girl-${(idx % 6) + 1}` : `chibi-boy-${(idx % 6) + 1}`,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        newStudentsList.push(newStu);
-        added++;
-      }
-    });
+      });
+      added = finalClassStudents.length;
+    } else {
+      // MERGE MODE: Giữ học sinh cũ của lớp này, cập nhật hoặc bổ sung thêm
+      finalClassStudents = [...currentClassStudents];
+      validRows.forEach((row, idx) => {
+        const normalizedAddress = normalizeStudentAddress(row.address);
+        const existingIdx = finalClassStudents.findIndex(
+          (s) =>
+            s.studentCode.trim().toLowerCase() === row.studentCode.trim().toLowerCase() ||
+            s.fullName.trim().toLowerCase() === row.fullName.trim().toLowerCase()
+        );
+
+        if (existingIdx >= 0) {
+          finalClassStudents[existingIdx] = {
+            ...finalClassStudents[existingIdx],
+            fullName: row.fullName.trim(),
+            gender: row.gender,
+            dateOfBirth: row.dateOfBirth,
+            address: normalizedAddress,
+            parentName: (row.parentName || '').trim() || finalClassStudents[existingIdx].parentName,
+            parentPhone: (row.parentPhone || '').trim() || finalClassStudents[existingIdx].parentPhone,
+            updatedAt: new Date().toISOString(),
+          };
+          updatedCount++;
+        } else {
+          let code = row.studentCode?.trim();
+          if (!code) {
+            code = `HS${targetClass.name.replace(/\s+/g, '')}_${(finalClassStudents.length + 1).toString().padStart(2, '0')}`;
+          }
+          finalClassStudents.push({
+            id: `STU_${targetClass.id}_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+            studentCode: code,
+            fullName: row.fullName.trim(),
+            gender: row.gender,
+            dateOfBirth: row.dateOfBirth,
+            address: normalizedAddress,
+            parentName: (row.parentName || '').trim(),
+            parentPhone: (row.parentPhone || '').trim(),
+            parentEmail: (row.parentEmail || '').trim(),
+            currentClassId: targetClass.id,
+            currentGradeId: targetClass.gradeId || 'G1',
+            currentSchoolYearId: db.currentSchoolYearId || 'SY2026_2027',
+            notes: (row.notes || '').trim(),
+            chibiAvatarId: row.gender === 'Nữ' ? `chibi-girl-${(idx % 6) + 1}` : `chibi-boy-${(idx % 6) + 1}`,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+          added++;
+        }
+      });
+    }
+
+    // Combine: all other classes + this target class
+    const updatedStudentsList = [...otherClassesStudents, ...finalClassStudents];
 
     const updatedDb = {
       ...db,
-      students: newStudentsList,
+      students: updatedStudentsList,
+      lastUpdated: new Date().toISOString(),
     };
 
     storage.save(updatedDb, true, {
       category: 'Học sinh',
-      action: `Nhập danh sách học sinh vào lớp ${targetClass?.name}`,
-      details: `Đã nhập thành công ${added} học sinh mới, cập nhật ${updatedCount} học sinh theo phương thức ${importMode}.`,
+      action: `Tải danh sách học sinh Lớp ${targetClass.name}`,
+      details: `Đã nạp chính xác ${finalClassStudents.length} học sinh cho Lớp ${targetClass.name} (chế độ ${importMode}). Các lớp khác (${otherClassesStudents.length} học sinh) được giữ nguyên 100%.`,
     });
+
+    // Auto-backup whenever student roster is imported
+    storage.createBackup(
+      `Tự động sao lưu: Tải danh sách học sinh Lớp ${targetClass.name} (${finalClassStudents.length} em)`,
+      'auto_import'
+    );
 
     setResultSummary({
       added,
       updated: updatedCount,
-      skipped,
-      errors: skipped,
+      skipped: parsedRows.length - validRows.length,
+      errors: parsedRows.length - validRows.length,
     });
   };
 
@@ -444,10 +653,20 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                 </div>
               </div>
 
-              <div className="pt-4">
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-left flex items-start gap-2.5 max-w-lg mx-auto">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-emerald-900">
+                  <p className="font-bold">Đã tự động sao lưu dữ liệu (Auto-Backup) thành công!</p>
+                  <p className="text-[11px] text-emerald-700 mt-0.5">
+                    Hệ thống đã lưu ảnh chụp an toàn cho toàn bộ học sinh vừa nhập. Bạn có thể kiểm tra hoặc khôi phục lại bất cứ khi nào tại mục &quot;Sao lưu & Khôi phục&quot;.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
                 <button
                   onClick={handleFinish}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition"
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition cursor-pointer"
                 >
                   Xong & Đóng cửa sổ
                 </button>
@@ -617,6 +836,30 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                     </button>
                   </div>
 
+                  {/* Address Auto-Conversion Notification */}
+                  <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-emerald-900">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        <strong>Chuẩn hóa địa chỉ:</strong> Tự động đổi toàn bộ địa chỉ từ <strong>"Duy Phước"</strong> thành <strong>"Nam Phước"</strong> theo quy chuẩn mới.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setParsedRows((prev) =>
+                          prev.map((r) => ({
+                            ...r,
+                            address: normalizeStudentAddress(r.address),
+                          }))
+                        );
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg font-bold text-[11px] shrink-0 transition cursor-pointer"
+                    >
+                      Đồng bộ lại Nam Phước
+                    </button>
+                  </div>
+
                   {/* Preview Table */}
                   <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-72">
                     <table className="w-full text-left border-collapse text-[11px]">
@@ -627,7 +870,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                           <th className="p-2">Họ và Tên</th>
                           <th className="p-2 text-center">Giới tính</th>
                           <th className="p-2">Ngày sinh</th>
-                          <th className="p-2">Địa chỉ</th>
+                          <th className="p-2">Địa chỉ (Nam Phước)</th>
                           <th className="p-2">SĐT PH</th>
                           <th className="p-2 text-center">Trạng thái</th>
                         </tr>
@@ -699,7 +942,13 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                                   updated[idx].address = e.target.value;
                                   setParsedRows(updated);
                                 }}
-                                className="w-32 px-1 py-0.5 border border-slate-300 rounded"
+                                onBlur={(e) => {
+                                  const updated = [...parsedRows];
+                                  updated[idx].address = normalizeStudentAddress(e.target.value);
+                                  setParsedRows(updated);
+                                }}
+                                title="Địa chỉ (chuẩn hóa Nam Phước)"
+                                className="w-36 px-1.5 py-0.5 border border-slate-300 rounded font-medium text-slate-800"
                               />
                             </td>
                             <td className="p-2">
@@ -759,18 +1008,22 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                         onChange={(e) => setSelectedClass(e.target.value)}
                         className="w-full px-3 py-2 text-xs font-bold border border-blue-300 rounded-xl bg-blue-50/40 text-blue-900 focus:ring-2 focus:ring-blue-500"
                       >
-                        {db.classes
-                          .filter((c) => c.schoolYearId === db.currentSchoolYearId)
-                          .map((c) => {
-                            const matchedTeacher = db.teachers.find((t) => t.id === c.homeroomTeacherId);
-                            const teacherName = c.customTeacherName || matchedTeacher?.fullName || 'Chưa phân công';
-                            return (
-                              <option key={c.id} value={c.id}>
-                                Lớp {c.name} — GVCN: {teacherName}
-                              </option>
-                            );
-                          })}
+                        {db.classes.map((c) => {
+                          const matchedTeacher = db.teachers.find((t) => t.id === c.homeroomTeacherId);
+                          const teacherName = c.customTeacherName || matchedTeacher?.fullName || 'Chưa phân công';
+                          const existingCount = db.students.filter(
+                            (s) => s.currentClassId === c.id || s.currentClassId?.toLowerCase() === c.name.toLowerCase()
+                          ).length;
+                          return (
+                            <option key={c.id} value={c.id}>
+                              Lớp {c.name} ({existingCount} HS hiện tại) — GVCN: {teacherName}
+                            </option>
+                          );
+                        })}
                       </select>
+                      <p className="text-[11px] text-slate-500 mt-1.5">
+                        Lớp được chọn sẽ tiếp nhận toàn bộ {parsedRows.filter((r) => r.isValid).length} học sinh từ file.
+                      </p>
                     </div>
 
                     <div>
@@ -778,32 +1031,36 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                         Chế độ nạp dữ liệu <span className="text-red-500">*</span>
                       </label>
                       <div className="space-y-2">
-                        <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-blue-300 bg-blue-50/40 hover:bg-blue-50 cursor-pointer">
                           <input
                             type="radio"
                             name="importMode"
-                            checked={importMode === 'merge'}
-                            onChange={() => setImportMode('merge')}
-                          />
-                          <div>
-                            <div className="font-bold text-slate-800">MERGE (Hợp nhất dữ liệu)</div>
-                            <div className="text-[10px] text-slate-500">
-                              Giữ học sinh cũ, thêm học sinh mới, nếu trùng mã HS thì cập nhật thông tin.
-                            </div>
-                          </div>
-                        </label>
-
-                        <label className="flex items-center gap-2 p-2.5 rounded-xl border border-rose-200 bg-rose-50/40 hover:bg-rose-50 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="importMode"
+                            className="mt-0.5"
                             checked={importMode === 'replace'}
                             onChange={() => setImportMode('replace')}
                           />
                           <div>
-                            <div className="font-bold text-rose-800">REPLACE ALL (Thay thế toàn bộ)</div>
-                            <div className="text-[10px] text-rose-700">
-                              Xóa sạch danh sách hiện tại của lớp và nạp danh sách mới này.
+                            <div className="font-bold text-blue-900 text-xs">
+                              CẬP NHẬT CHUẨN XÁC THEO FILE (Khuyên dùng)
+                            </div>
+                            <div className="text-[11px] text-blue-800 leading-relaxed mt-0.5">
+                              Lớp này sẽ có đúng chính xác <strong>{parsedRows.filter((r) => r.isValid).length} học sinh</strong> theo file tải lên. Danh sách của tất cả các lớp khác được bảo toàn 100%, không bị ảnh hưởng.
+                            </div>
+                          </div>
+                        </label>
+
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="importMode"
+                            className="mt-0.5"
+                            checked={importMode === 'merge'}
+                            onChange={() => setImportMode('merge')}
+                          />
+                          <div>
+                            <div className="font-bold text-slate-800 text-xs">BỔ SUNG THÊM VÀO LỚP</div>
+                            <div className="text-[11px] text-slate-500 leading-relaxed mt-0.5">
+                              Giữ nguyên học sinh cũ trong lớp này và bổ sung thêm học sinh mới từ file.
                             </div>
                           </div>
                         </label>
@@ -811,14 +1068,18 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                     </div>
                   </div>
 
-                  {importMode === 'replace' && (
-                    <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-rose-900 flex items-start gap-2.5">
-                      <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                      <div>
-                        <strong>CẢNH BÁO NGUY HIỂM:</strong> Thao tác <em>Replace All</em> sẽ ghi đè và thay thế toàn bộ học sinh đang có trong lớp này. Vui lòng xác nhận kỹ lưỡng trước khi tiến hành.
-                      </div>
+                  {/* Safety Guarantee Box */}
+                  <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-950 flex items-start gap-2.5 text-xs">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-bold text-emerald-900">Cam kết an toàn dữ liệu học sinh:</div>
+                      <ul className="list-disc list-inside space-y-0.5 text-emerald-800 text-[11px]">
+                        <li>Tải lớp nào giữ nguyên số lượng và danh sách lớp đó, các lớp khác tuyệt đối không bị ảnh hưởng.</li>
+                        <li>Đảm bảo đầy đủ thông tin, nạp đủ <strong>{parsedRows.filter((r) => r.isValid).length} học sinh</strong>, không bị thiếu sót hay mất học sinh.</li>
+                        <li>Tự động chuẩn hóa địa chỉ: xóa "Huyện Duy Xuyên", hiển thị "Xã Nam Phước".</li>
+                      </ul>
                     </div>
-                  )}
+                  </div>
 
                   <div className="flex justify-between items-center pt-4 border-t border-slate-200">
                     <button

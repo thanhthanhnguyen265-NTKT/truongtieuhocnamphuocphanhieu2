@@ -33,6 +33,11 @@ import {
   MessageSquare,
   ChevronRight,
   HelpCircle,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  ChevronLeft,
+  RefreshCw,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { storage } from '../services/storage';
@@ -297,6 +302,10 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
   const [criterionFilterType, setCriterionFilterType] = useState<'all' | 'positive' | 'negative'>('all');
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
 
+  // Folder-based teacher grouping states
+  const [viewMode, setViewMode] = useState<'folder' | 'flat'>('folder');
+  const [selectedTeacherFolder, setSelectedTeacherFolder] = useState<string | null>(null);
+
   useEffect(() => {
     const unsub = storage.subscribe(() => {
       setDb({ ...storage.getDb() });
@@ -305,14 +314,15 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
   }, []);
 
   const subjectClasses = (db.subjectClasses || []).filter(
-    (c) => c.schoolYearId === db.currentSchoolYearId
+    (c) => !c.schoolYearId || c.schoolYearId === db.currentSchoolYearId || c.schoolYearId === 'SY2026_2027'
   );
 
   const filteredClasses = subjectClasses.filter((c) => {
     const matchSearch =
       !searchQuery ||
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.subject.toLowerCase().includes(searchQuery.toLowerCase());
+      c.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.teacherName || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchSubject =
       selectedSubjectFilter === 'all' || c.subject === selectedSubjectFilter;
     return matchSearch && matchSubject;
@@ -332,6 +342,41 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
       return db.students.filter((s) => (cls.customStudentIds || []).includes(s.id));
     }
   };
+
+  // Group filteredClasses by teacher name into folders
+  const teacherFolders = React.useMemo(() => {
+    const map: Record<
+      string,
+      {
+        teacherName: string;
+        teacherId?: string;
+        classes: SubjectClass[];
+        subjects: string[];
+        totalStudents: number;
+      }
+    > = {};
+
+    filteredClasses.forEach((cls) => {
+      const tName = (cls.teacherName || '').trim() || 'Chưa phân công giáo viên';
+      if (!map[tName]) {
+        map[tName] = {
+          teacherName: tName,
+          teacherId: cls.teacherId,
+          classes: [],
+          subjects: [],
+          totalStudents: 0,
+        };
+      }
+      map[tName].classes.push(cls);
+      if (cls.subject && !map[tName].subjects.includes(cls.subject)) {
+        map[tName].subjects.push(cls.subject);
+      }
+      const students = getStudentsForClass(cls);
+      map[tName].totalStudents += students.length;
+    });
+
+    return Object.values(map).sort((a, b) => a.teacherName.localeCompare(b.teacherName));
+  }, [filteredClasses, db.students, db.currentSchoolYearId]);
 
   const activeClassStudents = activeClass ? getStudentsForClass(activeClass) : [];
 
@@ -759,7 +804,7 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
               <strong>Thanh Nguyễn</strong>
             </td>
             <td>
-              <em>Duy Xuyên, ngày ...... tháng ...... năm 2026</em><br/>
+              <em>Nam Phước, ngày ...... tháng ...... năm 2026</em><br/>
               <strong>GIÁO VIÊN PHỤ TRÁCH BỘ MÔN</strong><br/>
               <em>(Ký và ghi rõ họ tên)</em>
               <br/><br/><br/><br/><br/>
@@ -846,20 +891,28 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
   const pastAttendanceDays = activeClass?.attendanceDays || [];
 
   // Form handling for Add/Edit
-  const handleOpenAdd = () => {
+  const handleOpenAdd = (presetTeacher?: string) => {
+    const tName = presetTeacher || selectedTeacherFolder || '';
+    const teacherObj = db.teachers.find((t) => t.fullName === tName);
+    const defaultSubj = teacherObj?.subjects?.[0] || 'Tiếng Anh';
+
     setEditingClass(null);
     setFormData({
-      name: `Tiếng Anh Lớp ${db.classes[0]?.name || '4A'}`,
-      subject: 'Tiếng Anh',
-      teacherName: '',
+      name: `${defaultSubj} Lớp ${db.classes[0]?.name || '4A'}`,
+      subject: defaultSubj,
+      teacherName: tName,
       type: 'linked',
       linkedClassIds: [db.classes[0]?.id || ''],
       customStudentIds: [],
-      roomNumber: 'Phòng chức năng số 1',
+      roomNumber: `Phòng bộ môn ${defaultSubj}`,
       schedule: 'Thứ 2 (Tiết 3) & Thứ 4 (Tiết 2)',
-      notes: 'Lớp bộ môn chuyên theo phân phối chương trình',
+      notes: tName ? `Lớp bộ môn phân công cho ${tName}` : 'Lớp bộ môn chuyên theo phân phối chương trình',
     });
     setShowAddModal(true);
+  };
+
+  const handleOpenAddForTeacher = (teacherName: string) => {
+    handleOpenAdd(teacherName);
   };
 
   const handleOpenEdit = (cls: SubjectClass) => {
@@ -879,9 +932,11 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
   };
 
   const handleDeleteClass = (id: string, name: string) => {
-    if (confirm(`Bạn có chắc chắn muốn xóa lớp bộ môn "${name}"?`)) {
+    if (confirm(`Bạn có chắc chắn muốn xóa lớp bộ môn "${name}" khỏi hệ thống và thư mục giáo viên?`)) {
       storage.deleteSubjectClass(id);
       if (activeClassId === id) setActiveClassId(null);
+      setDb({ ...storage.getDb() });
+      triggerToast(`Đã xóa lớp bộ môn "${name}" thành công!`);
     }
   };
 
@@ -935,32 +990,83 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
             Lớp Bộ Môn Chuyên Biệt (Tiếng Anh, Tin học, Mỹ thuật, Âm nhạc, GDTC...)
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Theo dõi chuyên cần theo từng ngày học, đánh giá định kỳ & nhận xét chuẩn Thông tư 27 (Kỳ 1, Kỳ 2), chấm thi đua trực tiếp và xuất báo cáo Word/Excel chính thức.
+            Quản lý khoa học theo từng <strong>thư mục tên giáo viên</strong>, theo dõi chuyên cần theo ngày, đánh giá định kỳ Kỳ 1 & Kỳ 2 theo Thông tư 27, chấm điểm thi đua và xuất file Word/Excel.
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition flex items-center gap-2 shadow-xs shrink-0 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tạo Lớp Bộ Môn Mới</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              const res = storage.syncAllTeachersSubjectClasses();
+              setSaveSuccessMessage(`Đã đồng bộ ${res.totalClasses} lớp bộ môn cho ${res.count} giáo viên!`);
+              setTimeout(() => setSaveSuccessMessage(null), 4000);
+            }}
+            className="px-3.5 py-2.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+            title="Tự động đồng bộ và liên kết danh sách học sinh theo phân công của giáo viên"
+          >
+            <Sparkles className="w-4 h-4 text-indigo-600" />
+            <span>Đồng bộ từ Giáo viên</span>
+          </button>
+
+          <button
+            onClick={() => handleOpenAdd()}
+            className="px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition flex items-center gap-2 shadow-xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tạo Lớp Bộ Môn Mới</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Grid or Class Detail View */}
       {!activeClass ? (
         <>
-          {/* Toolbar */}
+          {/* Toolbar with Folder Mode Switcher */}
           <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
+              {/* View Mode Toggle: Folders vs Flat */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('folder');
+                    setSelectedTeacherFolder(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                    viewMode === 'folder'
+                      ? 'bg-white text-indigo-800 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Folder className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Theo Thư Mục Giáo Viên ({teacherFolders.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('flat');
+                    setSelectedTeacherFolder(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                    viewMode === 'flat'
+                      ? 'bg-white text-indigo-800 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Xem Toàn Bộ Lớp ({filteredClasses.length})</span>
+                </button>
+              </div>
+
+              <div className="relative flex-1 sm:w-56">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Tìm lớp, môn học..."
+                  placeholder="Tìm lớp, giáo viên, môn..."
                   className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-hidden focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -979,109 +1085,305 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
               </select>
             </div>
 
-            <div className="text-xs font-semibold text-slate-500">
-              Tổng số: <strong className="text-indigo-700">{filteredClasses.length}</strong> lớp bộ môn
+            <div className="text-xs font-semibold text-slate-500 flex items-center gap-2">
+              <span>{teacherFolders.length} Thư mục GV</span>
+              <span>•</span>
+              <span className="text-indigo-700 font-bold">{filteredClasses.length} Lớp học</span>
             </div>
           </div>
 
-          {/* Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredClasses.length > 0 ? (
-              filteredClasses.map((cls) => {
-                const students = getStudentsForClass(cls);
-                return (
-                  <div
-                    key={cls.id}
-                    className="bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-3">
-                        <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold">
-                          {cls.subject}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleOpenEdit(cls)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 cursor-pointer"
-                            title="Sửa lớp"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteClass(cls.id, cls.name)}
-                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-50 cursor-pointer"
-                            title="Xóa lớp"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <h3 className="text-base font-bold text-slate-900 mb-1">{cls.name}</h3>
-
-                      <div className="space-y-1.5 text-xs text-slate-600 mt-3">
-                        <div className="flex items-center gap-2">
-                          <Users className="w-3.5 h-3.5 text-slate-400" />
-                          <span>
-                            Sĩ số: <strong className="text-slate-900">{students.length}</strong> học sinh
-                          </span>
-                          <span className="text-[11px] text-slate-400">
-                            ({cls.type === 'linked' ? 'Liên kết lớp CN' : 'Danh sách riêng'})
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-                          <span>
-                            GV phụ trách: <strong className="text-slate-800">{cls.teacherName || 'GV Bộ môn'}</strong>
-                          </span>
-                        </div>
-
-                        {cls.schedule && (
-                          <div className="flex items-center gap-2">
-                            <Clock className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{cls.schedule}</span>
-                          </div>
-                        )}
-
-                        {cls.roomNumber && (
-                          <div className="flex items-center gap-2">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{cls.roomNumber}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
-                      <button
-                        onClick={() => setActiveClassId(cls.id)}
-                        className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <span>Vào Sổ Đánh Giá, Điểm Danh & Thi Đua</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="col-span-full py-12 text-center bg-white rounded-2xl border border-slate-200">
-                <BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                <h4 className="text-sm font-bold text-slate-700">Chưa có lớp bộ môn nào</h4>
-                <p className="text-xs text-slate-400 mt-1 mb-4">
-                  Nhấn nút "Tạo Lớp Bộ Môn Mới" để tạo lớp cho môn Tiếng Anh, Tin học, Mỹ thuật, Âm nhạc...
-                </p>
+          {/* Teacher Folder Breadcrumb Header if inside a folder */}
+          {selectedTeacherFolder && (
+            <div className="p-4 bg-gradient-to-r from-indigo-50 to-sky-50 border border-indigo-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-3">
                 <button
-                  onClick={handleOpenAdd}
-                  className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition inline-flex items-center gap-2 cursor-pointer"
+                  type="button"
+                  onClick={() => setSelectedTeacherFolder(null)}
+                  className="p-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl transition text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Quay lại danh sách các thư mục giáo viên"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>Tạo lớp bộ môn đầu tiên</span>
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Tất cả thư mục</span>
+                </button>
+
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                    <FolderOpen className="w-4 h-4 text-indigo-600" />
+                    <span>Thư mục giáo viên</span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 mt-0.5">
+                    <span>{selectedTeacherFolder}</span>
+                  </h3>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddForTeacher(selectedTeacherFolder)}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Thêm lớp cho {selectedTeacherFolder}</span>
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* RENDER MODE 1: Teacher Folders Grid (when viewMode is 'folder' and no folder is selected) */}
+          {viewMode === 'folder' && !selectedTeacherFolder ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {teacherFolders.length > 0 ? (
+                teacherFolders.map((folder) => {
+                  return (
+                    <div
+                      key={folder.teacherName}
+                      className="bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between group"
+                    >
+                      <div>
+                        {/* Folder Header */}
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center group-hover:scale-105 transition">
+                              <Folder className="w-5 h-5 fill-amber-500/20" />
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                Thư mục giáo viên
+                              </span>
+                              <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-700 transition line-clamp-1">
+                                {folder.teacherName}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-[11px] font-bold">
+                            {folder.classes.length} Lớp
+                          </span>
+                        </div>
+
+                        {/* Subjects badges */}
+                        <div className="mb-3">
+                          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                            <BookOpen className="w-3 h-3 text-emerald-600" />
+                            <span>Môn phụ trách:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {folder.subjects.length > 0 ? (
+                              folder.subjects.map((sub, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[10px] font-semibold"
+                                >
+                                  {sub}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Chưa xác định môn</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Statistics metrics */}
+                        <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs mb-3">
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                            <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>
+                              <strong>{folder.classes.length}</strong> lớp bộ môn
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                            <Users className="w-3.5 h-3.5 text-sky-600" />
+                            <span>
+                              <strong>{folder.totalStudents}</strong> học sinh
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Class list previews in this folder */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Các lớp trong thư mục:
+                          </span>
+                          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                            {folder.classes.map((cls) => (
+                              <span
+                                key={cls.id}
+                                className="px-2 py-0.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200 rounded-md text-[10px] font-medium transition"
+                              >
+                                {cls.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Folder Action Buttons */}
+                      <div className="pt-4 mt-4 border-t border-slate-100 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTeacherFolder(folder.teacherName)}
+                          className="flex-1 py-2 px-3 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          <span>Mở Thư Mục ({folder.classes.length})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAddForTeacher(folder.teacherName)}
+                          className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-xl transition cursor-pointer"
+                          title={`Thêm lớp cho ${folder.teacherName}`}
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="col-span-full py-12 text-center bg-white rounded-2xl border border-slate-200">
+                  <Folder className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <h4 className="text-sm font-bold text-slate-700">Chưa có thư mục giáo viên nào</h4>
+                  <p className="text-xs text-slate-400 mt-1 mb-4">
+                    Nhấn nút "Đồng bộ từ Giáo viên" để tự động tạo thư mục lớp cho toàn bộ giáo viên theo môn học và lớp phân công.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = storage.syncAllTeachersSubjectClasses();
+                      setSaveSuccessMessage(`Đã đồng bộ ${res.totalClasses} lớp bộ môn cho ${res.count} giáo viên!`);
+                      setTimeout(() => setSaveSuccessMessage(null), 4000);
+                    }}
+                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Đồng bộ từ Giáo viên ngay</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* RENDER MODE 2: Individual Classes Cards Grid (Inside a Teacher Folder OR in Flat View) */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(() => {
+                const classesToDisplay = selectedTeacherFolder
+                  ? filteredClasses.filter((c) => {
+                      const t = (c.teacherName || '').trim() || 'Chưa phân công giáo viên';
+                      return t === selectedTeacherFolder;
+                    })
+                  : filteredClasses;
+
+                if (classesToDisplay.length === 0) {
+                  return (
+                    <div className="col-span-full py-12 text-center bg-white rounded-2xl border border-slate-200">
+                      <BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                      <h4 className="text-sm font-bold text-slate-700">Không tìm thấy lớp học nào</h4>
+                      <p className="text-xs text-slate-400 mt-1 mb-4">
+                        {selectedTeacherFolder
+                          ? `Thư mục "${selectedTeacherFolder}" chưa có lớp học phù hợp với bộ lọc.`
+                          : 'Chưa có lớp bộ môn nào.'}
+                      </p>
+                      <button
+                        onClick={() => handleOpenAdd(selectedTeacherFolder || undefined)}
+                        className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition inline-flex items-center gap-2 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Tạo Lớp Cho Thư Mục Này</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                return classesToDisplay.map((cls) => {
+                  const students = getStudentsForClass(cls);
+                  return (
+                    <div
+                      key={cls.id}
+                      className="bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold">
+                            {cls.subject}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEdit(cls);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 cursor-pointer"
+                              title="Sửa lớp"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteClass(cls.id, cls.name);
+                              }}
+                              className="p-1.5 text-rose-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer transition"
+                              title="Xóa lớp này"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <h3 className="text-base font-bold text-slate-900 mb-1">{cls.name}</h3>
+
+                        <div className="space-y-1.5 text-xs text-slate-600 mt-3">
+                          <div className="flex items-center gap-2">
+                            <Users className="w-3.5 h-3.5 text-slate-400" />
+                            <span>
+                              Sĩ số: <strong className="text-slate-900">{students.length}</strong> học sinh
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              ({cls.type === 'linked' ? 'Liên kết lớp CN' : 'Danh sách riêng'})
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+                            <span>
+                              GV phụ trách: <strong className="text-slate-800">{cls.teacherName || 'GV Bộ môn'}</strong>
+                            </span>
+                          </div>
+
+                          {cls.schedule && (
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{cls.schedule}</span>
+                            </div>
+                          )}
+
+                          {cls.roomNumber && (
+                            <div className="flex items-center gap-2">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{cls.roomNumber}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+                        <button
+                          onClick={() => setActiveClassId(cls.id)}
+                          className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <span>Vào Sổ Đánh Giá, Điểm Danh & Thi Đua</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
         </>
       ) : (
         /* ========================================================= */
@@ -1132,6 +1434,17 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
               >
                 <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                 <span>Xuất Excel (.xlsx)</span>
+              </button>
+
+              {/* Nút Xóa Lớp */}
+              <button
+                type="button"
+                onClick={() => handleDeleteClass(activeClass.id, activeClass.name)}
+                className="px-3 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="Xóa lớp học này"
+              >
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>Xóa Lớp</span>
               </button>
             </div>
           </div>

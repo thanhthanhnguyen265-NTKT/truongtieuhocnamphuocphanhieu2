@@ -342,6 +342,19 @@ export interface SubjectClass {
   updatedAt: string;
 }
 
+export interface DatabaseBackup {
+  id: string;
+  timestamp: string;
+  reason: string;
+  studentCount: number;
+  teacherCount: number;
+  classCount: number;
+  classesSummary: string;
+  performedBy: string;
+  type: 'auto_import' | 'auto_edit' | 'manual';
+  data?: string; // Full JSON snapshot
+}
+
 export interface AppDatabase {
   schoolYears: SchoolYear[];
   grades: Grade[];
@@ -354,6 +367,7 @@ export interface AppDatabase {
   evaluations: EvaluationRecord[];
   monthlyAssessments?: MonthlyAssessmentTT27[];
   subjectClasses?: SubjectClass[];
+  backups?: DatabaseBackup[];
   criteria: CompetitionCriterion[];
   transactions: CompetitionTransaction[];
   badges: Badge[];
@@ -366,6 +380,7 @@ export interface AppDatabase {
   currentSchoolYearId: string;
   currentUser: Teacher;
   isOwnerUnlocked: boolean;
+  lastUpdated?: string;
 }
 
 

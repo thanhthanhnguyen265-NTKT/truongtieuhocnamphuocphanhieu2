@@ -246,7 +246,7 @@ export function generateOfficialReportHtml(
         <div class="motto">Độc lập - Tự do - Hạnh phúc</div>
         <div class="divider"></div>
         <div style="font-size: 11px; margin-top: 4px; font-style: italic; color: #475569;">
-          Duy Phước, ngày ${day} tháng ${month} năm ${year}
+          Nam Phước, ngày ${day} tháng ${month} năm ${year}
         </div>
       </div>
     </div>
@@ -315,7 +315,7 @@ export function generateOfficialReportHtml(
         <div class="signature-name">${creatorName}</div>
       </div>
       <div class="signature-col">
-        <div class="location-date">Duy Phước, ngày ${day} tháng ${month} năm ${year}</div>
+        <div class="location-date">Nam Phước, ngày ${day} tháng ${month} năm ${year}</div>
         <div class="role-title">HIỆU TRƯỞNG / PHÂN HIỆU TRƯỞNG</div>
         <div class="role-sub">(Ký, đóng dấu và ghi rõ họ tên)</div>
         <div class="signature-name">${settings.principalName || 'Ban Giám Hiệu'}</div>
@@ -405,7 +405,7 @@ export function downloadDirectPdf(
   doc.text('Doc lap - Tu do - Hanh phuc', 135, 23);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
-  doc.text(`Duy Phuoc, ngay ${day} thang ${month} nam ${year}`, 125, 29);
+  doc.text(`Nam Phuoc, ngay ${day} thang ${month} nam ${year}`, 125, 29);
 
   // Line divider
   doc.setLineWidth(0.3);
@@ -467,7 +467,7 @@ export function downloadDirectPdf(
 
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'italic');
-    doc.text(`Duy Phuoc, ngay ${day}/${month}/${year}`, 130, finalY - 4);
+    doc.text(`Nam Phuoc, ngay ${day}/${month}/${year}`, 130, finalY - 4);
     doc.setFontSize(9.5);
     doc.setFont('helvetica', 'bold');
     doc.text('HIEU TRUONG / BAN GIAM HIEU', 130, finalY);

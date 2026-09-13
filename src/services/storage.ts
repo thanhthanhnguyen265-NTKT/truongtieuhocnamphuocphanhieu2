@@ -21,6 +21,7 @@ import {
   PermissionRequest,
   MonthlyAssessmentTT27,
   SubjectClass,
+  DatabaseBackup,
   AppDatabase,
 } from '../types';
 import {
@@ -32,6 +33,8 @@ import {
 } from '../data/mockData';
 
 const STORAGE_KEY = 'SMART_STUDENT_MANAGER_NAM_PHUOC_V2';
+const BACKUP_STORAGE_KEY = 'SMART_STUDENT_MANAGER_BACKUP_HISTORY_V2';
+const EMERGENCY_STUDENTS_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_STUDENTS_V2';
 const FIRESTORE_COLLECTION = 'school_database';
 const FIRESTORE_DOC_ID = 'nam_phuoc_duy_phuoc_2';
 
@@ -42,6 +45,92 @@ export {
   INITIAL_CLASSES,
 };
 
+/**
+ * Chuẩn hóa địa chỉ học sinh: 
+ * - Hiện nay không còn là huyện Duy Xuyên, nên chỉ hiển thị là xã Nam Phước.
+ * - Tự động loại bỏ "Huyện Duy Xuyên" và chuyển đổi các địa danh từ "Duy Phước", "Thị trấn Nam Phước" thành "Xã Nam Phước".
+ */
+export function normalizeStudentAddress(addr?: string): string {
+  if (!addr || !addr.trim()) {
+    return 'Xã Nam Phước';
+  }
+  let s = addr
+    .replace(/huyện\s*duy\s*xuyên/gi, '')
+    .replace(/duy\s*xuyên/gi, '')
+    .replace(/thị\s*trấn\s*nam\s*phước/gi, 'Xã Nam Phước')
+    .replace(/xã\s*duy\s*phước/gi, 'Xã Nam Phước')
+    .replace(/duy\s*phước/gi, 'Nam Phước')
+    .trim();
+
+  // Strip leading/trailing commas or spaces
+  s = s.replace(/^[,\s]+|[,\s]+$/g, '').replace(/,\s*,/g, ', ').trim();
+
+  // If empty or just "Nam Phước"
+  if (!s || s.toLowerCase() === 'nam phước') {
+    return 'Xã Nam Phước';
+  }
+
+  // Ensure "Xã Nam Phước" format
+  if (!/nam\s*phước/i.test(s)) {
+    s += ', Xã Nam Phước';
+  } else if (!/xã\s*nam\s*phước/i.test(s)) {
+    s = s.replace(/nam\s*phước/gi, 'Xã Nam Phước');
+  }
+
+  // Final cleanup of duplicate "Xã Xã" or multiple commas or spaces
+  s = s.replace(/xã\s+xã/gi, 'Xã')
+       .replace(/,\s*,+/g, ',')
+       .replace(/\s+/g, ' ')
+       .trim();
+
+  return s;
+}
+
+/**
+ * Trộn danh sách học sinh an toàn theo từng lớp:
+ * - Bảo đảm tải lớp nào thì giữ nguyên số lượng và danh sách lớp đó, lớp khác không bị ảnh hưởng.
+ * - Không làm mất học sinh khi đồng bộ với Firestore.
+ */
+export function mergeStudentRosters(primary: Student[], secondary: Student[]): Student[] {
+  if (!primary || primary.length === 0) return secondary || [];
+  if (!secondary || secondary.length === 0) return primary || [];
+
+  const classIds = new Set<string>();
+  primary.forEach((s) => s.currentClassId && classIds.add(s.currentClassId));
+  secondary.forEach((s) => s.currentClassId && classIds.add(s.currentClassId));
+
+  const result: Student[] = [];
+
+  classIds.forEach((clsId) => {
+    const pStudents = primary.filter((s) => s.currentClassId === clsId);
+    const sStudents = secondary.filter((s) => s.currentClassId === clsId);
+
+    if (pStudents.length > 0 && sStudents.length === 0) {
+      result.push(...pStudents);
+    } else if (sStudents.length > 0 && pStudents.length === 0) {
+      result.push(...sStudents);
+    } else {
+      // Both have students for this class: keep the list with more students, or primary if equal
+      if (pStudents.length >= sStudents.length) {
+        result.push(...pStudents);
+      } else {
+        result.push(...sStudents);
+      }
+    }
+  });
+
+  // Also include students without class assignment
+  const pNoClass = primary.filter((s) => !s.currentClassId);
+  const sNoClass = secondary.filter((s) => !s.currentClassId);
+  if (pNoClass.length >= sNoClass.length) {
+    result.push(...pNoClass);
+  } else {
+    result.push(...sNoClass);
+  }
+
+  return result;
+}
+
 export const DEFAULT_SETTINGS: SchoolSettings = {
   schoolName: 'Trường Tiểu học Nam Phước',
   branchName: 'Phân hiệu 2 Duy Phước 2',
@@ -49,8 +138,8 @@ export const DEFAULT_SETTINGS: SchoolSettings = {
   ownerEmail: 'thanhthanhnguyen265@gmail.com',
   ownerPhone: '0905 123 456',
   copyrightNotice: 'Bản quyền sở hữu thuộc về Thanh Nguyễn. Mọi sửa đổi phải được sự chấp thuận từ chủ sở hữu.',
-  address: 'Thôn Lang Châu Bắc, Xã Duy Phước, Huyện Duy Xuyên',
-  district: 'Huyện Duy Xuyên',
+  address: 'Thôn Lang Châu Bắc, Xã Nam Phước',
+  district: 'Xã Nam Phước',
   province: 'Tỉnh Quảng Nam',
   digitalSealNumber: 'NP-DP2-2026/XTS',
   digitalSignatureTitle: 'XÁC THỰC CHỮ KÝ SỐ ĐIỆN TỬ - THANH NGUYỄN',
@@ -218,6 +307,18 @@ class StorageService {
       } else {
         const remoteData = snap.data() as AppDatabase;
         console.log(`Firebase: Loaded remote database with ${remoteData.students?.length || 0} students.`);
+        
+        // SAFE MERGE: Use class-scoped reconciliation so no class loses students!
+        const localStudents = this.cache?.students || [];
+        const remoteStudents = remoteData.students || [];
+        const mergedStudents = mergeStudentRosters(localStudents, remoteStudents);
+        remoteData.students = mergedStudents;
+
+        if (mergedStudents.length > (remoteStudents.length || 0)) {
+          console.log(`Firebase: Syncing ${mergedStudents.length} students back to cloud database...`);
+          setDoc(docRef, remoteData).catch((err) => console.warn('Cloud sync merge back error:', err));
+        }
+
         this.cache = this.reconcileDb(remoteData);
         this.isCloudConnected = true;
         this.notify();
@@ -227,6 +328,17 @@ class StorageService {
       this.firestoreUnsubscribe = onSnapshot(docRef, (snapshot) => {
         if (snapshot.exists() && !this.isSaving) {
           const remoteData = snapshot.data() as AppDatabase;
+          const localStudents = this.cache?.students || [];
+          const remoteStudents = remoteData.students || [];
+          
+          // Reconcile students safely: never drop uploaded classes or truncate to 9 students
+          const mergedStudents = mergeStudentRosters(localStudents, remoteStudents);
+          remoteData.students = mergedStudents;
+
+          if (mergedStudents.length > (remoteStudents.length || 0)) {
+            setDoc(docRef, remoteData).catch((err) => console.warn('Sync back merged students error:', err));
+          }
+
           // Keep current logged-in user preferences locally to avoid jarring role switches
           const localCurrentUser = this.cache?.currentUser;
           const localSchoolYearId = this.cache?.currentSchoolYearId;
@@ -253,8 +365,24 @@ class StorageService {
     if (!parsed.classes || !Array.isArray(parsed.classes) || parsed.classes.length === 0) {
       parsed.classes = base.classes;
     }
-    if (!parsed.students || !Array.isArray(parsed.students)) {
-      parsed.students = [];
+    if (!parsed.students || !Array.isArray(parsed.students) || parsed.students.length === 0) {
+      // Check emergency snapshot if available
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_STUDENTS_KEY);
+        if (emergency) {
+          const recovered = JSON.parse(emergency);
+          if (Array.isArray(recovered) && recovered.length > 0) {
+            console.log(`Restored ${recovered.length} students from emergency persistence.`);
+            parsed.students = recovered;
+          } else {
+            parsed.students = [];
+          }
+        } else {
+          parsed.students = [];
+        }
+      } catch (e) {
+        parsed.students = [];
+      }
     } else {
       // Purge 270 mock sample students per user request:
       // "xóa hết danh sách 270 học sinh mẫu có sẵn, chỉ hiển thị khi danh sách học sinh được cập nhật theo từng lớp lên hệ thống app"
@@ -268,6 +396,13 @@ class StorageService {
       if (parsed.students.some(isMockStudent)) {
         parsed.students = parsed.students.filter((s: Student) => !isMockStudent(s));
       }
+      // Ensure all student addresses are normalized: strip "Huyện Duy Xuyên" and force "Xã Nam Phước"
+      parsed.students = parsed.students.map((s: Student) => {
+        return {
+          ...s,
+          address: normalizeStudentAddress(s.address),
+        };
+      });
     }
     if (!parsed.studentHistory || !Array.isArray(parsed.studentHistory)) {
       parsed.studentHistory = [];
@@ -275,27 +410,15 @@ class StorageService {
     if (!parsed.schoolYears || !Array.isArray(parsed.schoolYears) || parsed.schoolYears.length === 0) {
       parsed.schoolYears = base.schoolYears;
     }
-    if (!parsed.teachers || !Array.isArray(parsed.teachers) || parsed.teachers.length === 0) {
+    if (!parsed.teachers || !Array.isArray(parsed.teachers)) {
       parsed.teachers = base.teachers;
     } else {
-      const hasVy = parsed.teachers.some((t: Teacher) => t.fullName?.includes('Lê Thị Vy'));
-      if (!hasVy) {
-        const vyTeacher = base.teachers.find((t) => t.id === 'T_LE_THI_VY');
-        if (vyTeacher) parsed.teachers.push(vyTeacher);
+      // Ensure the permanent school owner (Thanh Nguyễn / T001) always exists so admin access is never lost
+      const hasOwner = parsed.teachers.some((t: Teacher) => t.isOwner || t.id === 'T001');
+      if (!hasOwner) {
+        const ownerTeacher = base.teachers.find((t) => t.isOwner || t.id === 'T001');
+        if (ownerTeacher) parsed.teachers.unshift(ownerTeacher);
       }
-    }
-
-    if (parsed.classes && Array.isArray(parsed.classes)) {
-      parsed.classes = parsed.classes.map((cls: any) => {
-        if (cls.id === 'C1B' || cls.name === '1B') {
-          return {
-            ...cls,
-            customTeacherName: 'Cô Lê Thị Vy',
-            homeroomTeacherId: 'T_LE_THI_VY',
-          };
-        }
-        return cls;
-      });
     }
     if (!parsed.criteria || !Array.isArray(parsed.criteria) || parsed.criteria.length === 0) {
       parsed.criteria = base.criteria;
@@ -305,6 +428,9 @@ class StorageService {
     }
     if (!parsed.settings) {
       parsed.settings = base.settings;
+    } else {
+      parsed.settings.address = normalizeStudentAddress(parsed.settings.address);
+      parsed.settings.district = 'Xã Nam Phước';
     }
     if (!parsed.monthlyAssessments || !Array.isArray(parsed.monthlyAssessments)) {
       parsed.monthlyAssessments = [];
@@ -323,6 +449,14 @@ class StorageService {
     }
     if (!parsed.transactions || !Array.isArray(parsed.transactions)) {
       parsed.transactions = [];
+    }
+    if (!parsed.backups || !Array.isArray(parsed.backups)) {
+      try {
+        const rawBks = localStorage.getItem(BACKUP_STORAGE_KEY);
+        parsed.backups = rawBks ? JSON.parse(rawBks) : [];
+      } catch (e) {
+        parsed.backups = [];
+      }
     }
     return parsed as AppDatabase;
   }
@@ -412,10 +546,18 @@ class StorageService {
       newDb.auditLogs = [logItem, ...(newDb.auditLogs || [])].slice(0, 100);
     }
 
+    newDb.lastUpdated = new Date().toISOString();
     this.cache = newDb;
     this.isSaving = true;
 
     try {
+      // 0. Update emergency student copy if students exist to prevent data loss
+      if (newDb.students && newDb.students.length > 0) {
+        try {
+          localStorage.setItem(EMERGENCY_STUDENTS_KEY, JSON.stringify(newDb.students));
+        } catch (err) {}
+      }
+
       // 1. Local storage fallback
       localStorage.setItem(STORAGE_KEY, JSON.stringify(newDb));
 
@@ -641,18 +783,6 @@ class StorageService {
     return JSON.stringify(this.getDb(), null, 2);
   }
 
-  public downloadBackupJson(): void {
-    const json = this.exportBackupJson();
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Sao_Luu_TH_Nam_Phuoc_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
-
   public resetToInitial(): void {
     this.resetToDemo();
   }
@@ -804,14 +934,68 @@ class StorageService {
 
   public deleteSubjectClass(id: string): void {
     const db = this.getDb();
-    const updated = (db.subjectClasses || []).filter((c) => c.id !== id);
+    const target = (db.subjectClasses || []).find((c) => c.id === id);
+    const updatedSubjectClasses = (db.subjectClasses || []).filter((c) => c.id !== id);
+
+    let updatedTeachers = db.teachers;
+    let updatedClasses = db.classes;
+
+    if (target) {
+      // If target had a teacher and linked classes, unlink them from the teacher's assignedClassIds
+      const teacherName = target.teacherName?.trim().toLowerCase();
+      const teacherId = target.teacherId;
+      const linkedIds = target.linkedClassIds || [];
+
+      if ((teacherId || teacherName) && linkedIds.length > 0) {
+        updatedTeachers = db.teachers.map((t) => {
+          const isThisTeacher =
+            (teacherId && t.id === teacherId) ||
+            (teacherName && t.fullName?.trim().toLowerCase() === teacherName);
+          if (isThisTeacher) {
+            return {
+              ...t,
+              assignedClassIds: (t.assignedClassIds || []).filter((cid) => !linkedIds.includes(cid)),
+            };
+          }
+          return t;
+        });
+
+        updatedClasses = db.classes.map((cls) => {
+          if (linkedIds.includes(cls.id)) {
+            const isMatchTeacher =
+              (teacherId && cls.homeroomTeacherId === teacherId) ||
+              (teacherName && cls.customTeacherName?.trim().toLowerCase() === teacherName);
+            return {
+              ...cls,
+              subjectTeacherIds: (cls.subjectTeacherIds || []).filter((tid) => tid !== teacherId),
+              ...(isMatchTeacher && cls.homeroomTeacherId !== 'T001'
+                ? {
+                    homeroomTeacherId: 'T001',
+                    customTeacherName: 'Chưa phân công',
+                    customTeacherPhone: '',
+                  }
+                : {}),
+            };
+          }
+          return cls;
+        });
+      }
+    }
+
+    const updatedDb: AppDatabase = {
+      ...db,
+      teachers: updatedTeachers,
+      classes: updatedClasses,
+      subjectClasses: updatedSubjectClasses,
+    };
+
     this.save(
-      { ...db, subjectClasses: updated },
+      updatedDb,
       true,
       {
         category: 'Lớp bộ môn',
         action: 'Xóa lớp bộ môn chuyên / nhô',
-        details: `Đã xóa lớp bộ môn chuyên/nhô mã ${id}.`,
+        details: `Đã xóa lớp bộ môn "${target?.name || id}".`,
       }
     );
   }
@@ -831,6 +1015,283 @@ class StorageService {
     } catch (err: any) {
       return { success: false, message: `Lỗi đọc tệp sao lưu: ${err.message}` };
     }
+  }
+
+  /**
+   * Tạo bản sao lưu toàn diện hệ thống (Auto-Backup & Manual Backup)
+   * Tự động lưu trạng thái học sinh, điểm danh, nhận xét, thi đua
+   */
+  public createBackup(
+    reason: string,
+    type: 'auto_import' | 'auto_edit' | 'manual' = 'manual'
+  ): DatabaseBackup {
+    const db = this.getDb();
+    const studentCount = db.students?.length || 0;
+    const teacherCount = db.teachers?.length || 0;
+    const classCount = db.classes?.length || 0;
+
+    // Summary of classes and student distribution
+    const classSummaryMap: Record<string, number> = {};
+    (db.classes || []).forEach((c) => {
+      classSummaryMap[c.name] = 0;
+    });
+    (db.students || []).forEach((s) => {
+      const cls = db.classes.find((c) => c.id === s.currentClassId);
+      const name = cls?.name || 'Khác';
+      classSummaryMap[name] = (classSummaryMap[name] || 0) + 1;
+    });
+
+    const summaryStr =
+      Object.entries(classSummaryMap)
+        .filter(([_, count]) => count > 0)
+        .map(([name, count]) => `${name}: ${count} em`)
+        .join(', ') || 'Chưa có học sinh';
+
+    // Shallow snapshot without nested backup list to prevent recursive explosion
+    const snapshotDb = {
+      ...db,
+      backups: undefined,
+    };
+
+    const newBackup: DatabaseBackup = {
+      id: `BK_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+      reason,
+      studentCount,
+      teacherCount,
+      classCount,
+      classesSummary: summaryStr,
+      performedBy: db.currentUser?.fullName || 'Hệ thống tự động',
+      type,
+      data: JSON.stringify(snapshotDb),
+    };
+
+    const existingBackups = this.getBackups();
+    const updatedBackups = [newBackup, ...existingBackups.filter((b) => b.id !== newBackup.id)].slice(0, 30);
+    db.backups = updatedBackups;
+
+    try {
+      localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(updatedBackups));
+    } catch (e) {
+      console.warn('Could not write to BACKUP_STORAGE_KEY:', e);
+    }
+
+    return newBackup;
+  }
+
+  public getBackups(): DatabaseBackup[] {
+    const db = this.getDb();
+    if (db.backups && Array.isArray(db.backups) && db.backups.length > 0) {
+      return db.backups;
+    }
+    try {
+      const raw = localStorage.getItem(BACKUP_STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return [];
+  }
+
+  public async restoreBackup(backupId: string): Promise<boolean> {
+    const all = this.getBackups();
+    const target = all.find((b) => b.id === backupId);
+    if (!target || !target.data) return false;
+
+    try {
+      const parsed = JSON.parse(target.data) as AppDatabase;
+      parsed.backups = all; // Keep backup history intact
+      const reconciled = this.reconcileDb(parsed);
+
+      await this.save(reconciled, true, {
+        category: 'Hệ thống',
+        action: 'Khôi phục từ bản sao lưu',
+        details: `Đã khôi phục thành công bản sao lưu "${target.reason}" (${target.studentCount} học sinh).`,
+        status: 'SUCCESS',
+      });
+      return true;
+    } catch (err) {
+      console.error('Failed to restore backup:', err);
+      return false;
+    }
+  }
+
+  public deleteBackup(backupId: string): void {
+    const db = this.getDb();
+    const current = this.getBackups();
+    const updated = current.filter((b) => b.id !== backupId);
+    db.backups = updated;
+    try {
+      localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(updated));
+    } catch (e) {}
+    this.notify();
+  }
+
+  public downloadBackupJson(backupId?: string): void {
+    const db = this.getDb();
+    let contentToExport: any = db;
+    let filename = `SAO_LUU_TRUONG_NAM_PHUOC_${new Date().toISOString().slice(0, 10)}.json`;
+
+    if (backupId) {
+      const bks = this.getBackups();
+      const target = bks.find((b) => b.id === backupId);
+      if (target && target.data) {
+        contentToExport = JSON.parse(target.data);
+        filename = `SAO_LUU_${backupId}_${new Date(target.timestamp).toISOString().slice(0, 10)}.json`;
+      }
+    }
+
+    const blob = new Blob([JSON.stringify(contentToExport, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Tự động sinh hoặc cập nhật các lớp bộ môn (SubjectClass) cho giáo viên
+   * Liên kết tự động danh sách học sinh từ giáo viên chủ nhiệm
+   */
+  public syncTeacherSubjectClasses(teacher: Teacher, dbInstance?: AppDatabase): AppDatabase {
+    const currentDb = dbInstance || this.getDb();
+    let subjectClasses = [...(currentDb.subjectClasses || [])];
+
+    if (
+      !teacher.subjects ||
+      teacher.subjects.length === 0 ||
+      !teacher.assignedClassIds ||
+      teacher.assignedClassIds.length === 0
+    ) {
+      return currentDb;
+    }
+
+    teacher.subjects.forEach((subject) => {
+      teacher.assignedClassIds.forEach((classId) => {
+        const cls = currentDb.classes.find((c) => c.id === classId);
+        const className = cls?.name || classId;
+        const expectedName = `${subject} Lớp ${className}`;
+
+        const existingIdx = subjectClasses.findIndex(
+          (sc) =>
+            (sc.teacherId === teacher.id &&
+              sc.subject.toLowerCase() === subject.toLowerCase() &&
+              (sc.linkedClassIds || []).includes(classId)) ||
+            (sc.name.toLowerCase() === expectedName.toLowerCase() && sc.teacherId === teacher.id)
+        );
+
+        if (existingIdx >= 0) {
+          const existing = subjectClasses[existingIdx];
+          const linked = Array.from(new Set([...(existing.linkedClassIds || []), classId]));
+          subjectClasses[existingIdx] = {
+            ...existing,
+            teacherName: teacher.fullName,
+            teacherId: teacher.id,
+            name: expectedName,
+            subject,
+            type: 'linked',
+            linkedClassIds: linked,
+            updatedAt: new Date().toISOString(),
+          };
+        } else {
+          const newClass: SubjectClass = {
+            id: `SUBJ_${teacher.id}_${classId}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            name: expectedName,
+            subject,
+            teacherId: teacher.id,
+            teacherName: teacher.fullName,
+            schoolYearId: currentDb.currentSchoolYearId || 'SY2026_2027',
+            type: 'linked',
+            linkedClassIds: [classId],
+            customStudentIds: [],
+            roomNumber: `Phòng bộ môn ${subject}`,
+            schedule: `Theo phân công của ${teacher.fullName}`,
+            evaluations: [],
+            attendanceDays: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          subjectClasses.push(newClass);
+        }
+      });
+    });
+
+    currentDb.subjectClasses = subjectClasses;
+    return currentDb;
+  }
+
+  /**
+   * Đồng bộ toàn bộ các lớp chuyên/nhô cho tất cả giáo viên trong trường
+   */
+  public syncAllTeachersSubjectClasses(): { count: number; totalClasses: number } {
+    const db = this.getDb();
+    let updatedDb = { ...db };
+    let syncedTeachersCount = 0;
+
+    (db.teachers || []).forEach((teacher) => {
+      if (
+        teacher.subjects &&
+        teacher.subjects.length > 0 &&
+        teacher.assignedClassIds &&
+        teacher.assignedClassIds.length > 0
+      ) {
+        updatedDb = this.syncTeacherSubjectClasses(teacher, updatedDb);
+        syncedTeachersCount++;
+      }
+    });
+
+    this.save(updatedDb, true, {
+      category: 'Lớp bộ môn',
+      action: 'Tự động đồng bộ toàn bộ lớp chuyên / nhô',
+      details: `Đã đồng bộ thành công lớp học cho ${syncedTeachersCount} giáo viên bộ môn. Tổng cộng ${updatedDb.subjectClasses?.length || 0} lớp bộ môn.`,
+    });
+
+    this.createBackup(
+      `Tự động đồng bộ lớp chuyên/nhô cho ${syncedTeachersCount} giáo viên`,
+      'auto_edit'
+    );
+
+    return {
+      count: syncedTeachersCount,
+      totalClasses: updatedDb.subjectClasses?.length || 0,
+    };
+  }
+
+  /**
+   * Chuyển đổi toàn bộ địa chỉ có chứa "Duy Phước" thành "Nam Phước" trong cơ sở dữ liệu
+   */
+  public migrateStudentsAddressToNamPhuoc(): { updated: number } {
+    const db = this.getDb();
+    let count = 0;
+    const updatedStudents = (db.students || []).map((stu) => {
+      if (stu.address && /duy\s*phước/i.test(stu.address)) {
+        count++;
+        return {
+          ...stu,
+          address: normalizeStudentAddress(stu.address),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return stu;
+    });
+
+    if (count > 0) {
+      this.save(
+        { ...db, students: updatedStudents },
+        true,
+        {
+          category: 'Học sinh',
+          action: 'Chuẩn hóa địa chỉ Nam Phước',
+          details: `Đã tự động chuẩn hóa đổi địa chỉ từ "Duy Phước" sang "Nam Phước" cho ${count} học sinh.`,
+        }
+      );
+      this.createBackup(`Chuẩn hóa địa chỉ Nam Phước cho ${count} học sinh`, 'auto_edit');
+    }
+
+    return { updated: count };
   }
 }
 

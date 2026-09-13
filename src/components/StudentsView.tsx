@@ -17,7 +17,7 @@ import {
   Award,
   FileSpreadsheet,
 } from 'lucide-react';
-import { storage } from '../services/storage';
+import { storage, normalizeStudentAddress } from '../services/storage';
 import { Student } from '../types';
 import { ChibiAvatar, CHIBI_AVATARS } from '../data/chibiAvatars';
 import { ClearStudentsModal } from './ClearStudentsModal';
@@ -71,7 +71,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     gender: 'Nam' as 'Nam' | 'Nữ',
     dateOfBirth: '2016-05-15',
     chibiAvatarId: 'chibi-boy-1',
-    address: 'Xã Duy Phước, Huyện Duy Xuyên',
+    address: 'Thị trấn Nam Phước, Huyện Duy Xuyên',
     parentName: '',
     parentPhone: '',
     parentEmail: '',
@@ -112,7 +112,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       gender: 'Nam',
       dateOfBirth: '2016-05-15',
       chibiAvatarId: 'boy_cap',
-      address: 'Thôn Lang Châu Bắc, Duy Phước',
+      address: 'Xã Nam Phước',
       parentName: '',
       parentPhone: '',
       parentEmail: '',
@@ -231,6 +231,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
     const targetClass = db.classes.find((c) => c.id === formData.currentClassId);
     const targetGradeId = targetClass ? targetClass.gradeId : 'G4';
+    const finalAddress = normalizeStudentAddress(formData.address);
 
     if (editingStudent) {
       const updatedStudents = db.students.map((s) => {
@@ -241,7 +242,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             fullName: formData.fullName.trim(),
             gender: formData.gender,
             dateOfBirth: formData.dateOfBirth,
-            address: formData.address.trim(),
+            address: finalAddress,
             parentName: formData.parentName.trim(),
             parentPhone: formData.parentPhone.trim(),
             parentEmail: formData.parentEmail.trim(),
@@ -271,7 +272,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         fullName: formData.fullName.trim(),
         gender: formData.gender,
         dateOfBirth: formData.dateOfBirth,
-        address: formData.address.trim(),
+        address: finalAddress,
         parentName: formData.parentName.trim(),
         parentPhone: formData.parentPhone.trim(),
         parentEmail: formData.parentEmail.trim(),
@@ -740,13 +741,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Địa chỉ thường trú</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Địa chỉ thường trú <span className="text-xs text-emerald-600 font-normal">(Chuẩn hóa: Nam Phước)</span>
+                </label>
                 <input
                   type="text"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Thôn Lang Châu Bắc, Duy Phước, Duy Xuyên"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  onBlur={(e) =>
+                    setFormData({
+                      ...formData,
+                      address: normalizeStudentAddress(e.target.value),
+                    })
+                  }
+                  placeholder="Thôn Lang Châu Bắc, Nam Phước, Duy Xuyên"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-medium text-slate-800"
                 />
               </div>
 

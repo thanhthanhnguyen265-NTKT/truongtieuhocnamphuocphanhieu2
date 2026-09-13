@@ -10,9 +10,11 @@ import {
   CheckCircle2,
   Sparkles,
   Layers,
+  Trash2,
 } from 'lucide-react';
 import { Teacher } from '../types';
 import { storage } from '../services/storage';
+import { isRootOwnerTeacher } from './TeachersView';
 
 interface TeacherEditModalProps {
   isOpen: boolean;
@@ -45,8 +47,9 @@ export const TeacherEditModal: React.FC<TeacherEditModalProps> = ({
   const [selectedAvatar, setSelectedAvatar] = useState('teacher_female_aodai');
   const [subjectsStr, setSubjectsStr] = useState('');
   const [role, setRole] = useState<'homeroom' | 'subject' | 'admin'>('homeroom');
-  const [assignedClassesStr, setAssignedClassesStr] = useState('');
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (teacher) {
@@ -55,18 +58,25 @@ export const TeacherEditModal: React.FC<TeacherEditModalProps> = ({
       setEmail(teacher.email || '');
       setRole((teacher.role as any) || 'homeroom');
       setSubjectsStr(teacher.subjects?.join(', ') || '');
-      // Find classes assigned
-      const classNames = db.classes
-        .filter((c) => c.homeroomTeacherId === teacher.id || c.subjectTeacherIds?.includes(teacher.id))
-        .map((c) => c.name);
-      setAssignedClassesStr(teacher.assignedClassIds?.join(', ') || classNames.join(', '));
+      
+      // Find all classes assigned to this teacher
+      const linkedClasses = db.classes.filter(
+        (c) =>
+          c.homeroomTeacherId === teacher.id ||
+          (c.customTeacherName && c.customTeacherName.toLowerCase().trim() === teacher.fullName?.toLowerCase().trim()) ||
+          teacher.assignedClassIds?.includes(c.id)
+      );
+      const initialClassIds = Array.from(
+        new Set([...(teacher.assignedClassIds || []), ...linkedClasses.map((c) => c.id)])
+      );
+      setSelectedClassIds(initialClassIds);
     } else if (classNameContext) {
       // Find class and its teacher
       const cls = db.classes.find((c) => c.name === classNameContext);
       if (cls) {
         setFullName(cls.customTeacherName || 'Cô Nguyễn Thị Mai');
         setPhone(cls.customTeacherPhone || '0905 123 456');
-        setAssignedClassesStr(cls.name);
+        setSelectedClassIds([cls.id]);
       }
     }
   }, [teacher, classNameContext, db.classes]);
@@ -88,22 +98,66 @@ export const TeacherEditModal: React.FC<TeacherEditModalProps> = ({
     let updatedDb = { ...db };
 
     if (teacher) {
+      const updatedTeacher: Teacher = {
+        ...teacher,
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        role: role as any,
+        subjects: subjectsArr.length > 0 ? subjectsArr : teacher.subjects,
+        assignedClassIds: selectedClassIds,
+      };
+
       const updatedTeachers = db.teachers.map((t) => {
         if (t.id === teacher.id) {
-          return {
-            ...t,
-            fullName: fullName.trim(),
-            phone: phone.trim(),
-            email: email.trim(),
-            role: role as any,
-            subjects: subjectsArr.length > 0 ? subjectsArr : t.subjects,
-          };
+          return updatedTeacher;
         }
         return t;
       });
 
-      // Also update matching classes customTeacherName if homeroom
+      // Synchronize classes: unassign removed classes and update assigned ones
       const updatedClasses = db.classes.map((cls) => {
+        const wasHomeroom =
+          cls.homeroomTeacherId === teacher.id ||
+          (cls.customTeacherName &&
+            cls.customTeacherName.toLowerCase().trim() === teacher.fullName?.toLowerCase().trim());
+        const wasSubjectTeacher = cls.subjectTeacherIds?.includes(teacher.id);
+        const wasAssigned = (teacher.assignedClassIds || []).includes(cls.id) || wasHomeroom;
+
+        const isNowAssigned = selectedClassIds.includes(cls.id);
+
+        if (!isNowAssigned && (wasHomeroom || wasSubjectTeacher || wasAssigned)) {
+          return {
+            ...cls,
+            homeroomTeacherId: wasHomeroom ? 'T001' : cls.homeroomTeacherId,
+            customTeacherName: wasHomeroom ? 'Chưa phân công' : cls.customTeacherName,
+            customTeacherPhone: wasHomeroom ? '' : cls.customTeacherPhone,
+            subjectTeacherIds: (cls.subjectTeacherIds || []).filter((id) => id !== teacher.id),
+          };
+        }
+
+        if (isNowAssigned) {
+          if (role === 'homeroom') {
+            return {
+              ...cls,
+              homeroomTeacherId: teacher.id,
+              customTeacherName: fullName.trim(),
+              customTeacherPhone: phone.trim(),
+            };
+          } else {
+            const currentSubIds = cls.subjectTeacherIds || [];
+            const newSubIds = currentSubIds.includes(teacher.id)
+              ? currentSubIds
+              : [...currentSubIds, teacher.id];
+            return {
+              ...cls,
+              homeroomTeacherId: wasHomeroom ? 'T001' : cls.homeroomTeacherId,
+              customTeacherName: wasHomeroom ? 'Chưa phân công' : cls.customTeacherName,
+              subjectTeacherIds: newSubIds,
+            };
+          }
+        }
+
         if (cls.homeroomTeacherId === teacher.id) {
           return {
             ...cls,
@@ -123,25 +177,35 @@ export const TeacherEditModal: React.FC<TeacherEditModalProps> = ({
           phone: phone.trim(),
           email: email.trim(),
           role: role as any,
+          assignedClassIds: selectedClassIds,
         };
       }
+
+      // Clean up subject classes for removed classes
+      const removedClassIds = (teacher.assignedClassIds || []).filter(
+        (id) => !selectedClassIds.includes(id)
+      );
+      const updatedSubjectClasses = (db.subjectClasses || []).filter((sc) => {
+        if (
+          sc.teacherId === teacher.id ||
+          (sc.teacherName && sc.teacherName.toLowerCase().trim() === teacher.fullName?.toLowerCase().trim())
+        ) {
+          const linksToRemoved = (sc.linkedClassIds || []).some((cid) => removedClassIds.includes(cid));
+          return !linksToRemoved;
+        }
+        return true;
+      });
 
       updatedDb = {
         ...updatedDb,
         teachers: updatedTeachers,
         classes: updatedClasses,
+        subjectClasses: updatedSubjectClasses,
         currentUser: updatedCurrentUser,
       };
 
       if (onSaved) {
-        onSaved({
-          ...teacher,
-          fullName: fullName.trim(),
-          phone: phone.trim(),
-          email: email.trim(),
-          role: role as any,
-          subjects: subjectsArr,
-        });
+        onSaved(updatedTeacher);
       }
     } else if (classNameContext) {
       // Direct class teacher name update
@@ -172,6 +236,72 @@ export const TeacherEditModal: React.FC<TeacherEditModalProps> = ({
       setSuccessMessage('');
       onClose();
     }, 1200);
+  };
+
+  const handleDeleteTeacher = () => {
+    if (!teacher || isRootOwnerTeacher(teacher)) {
+      alert('Không thể xóa tài khoản Quản trị viên / Chủ sở hữu chính của trường (Thanh Nguyễn).');
+      return;
+    }
+
+    const currentDb = storage.getDb();
+    const updatedTeachers = currentDb.teachers.filter((t) => t.id !== teacher.id);
+    const updatedClasses = currentDb.classes.map((cls) => {
+      let changed = false;
+      let newHomeroomId = cls.homeroomTeacherId;
+      let newTeacherName = cls.customTeacherName;
+      let newSubjectTeacherIds = cls.subjectTeacherIds;
+
+      if (cls.homeroomTeacherId === teacher.id) {
+        newHomeroomId = 'T001';
+        newTeacherName = 'Chưa phân công';
+        changed = true;
+      }
+      if (cls.subjectTeacherIds?.includes(teacher.id)) {
+        newSubjectTeacherIds = cls.subjectTeacherIds.filter((id) => id !== teacher.id);
+        changed = true;
+      }
+      if (changed) {
+        return {
+          ...cls,
+          homeroomTeacherId: newHomeroomId,
+          customTeacherName: newTeacherName,
+          subjectTeacherIds: newSubjectTeacherIds,
+        };
+      }
+      return cls;
+    });
+
+    const updatedSubjectClasses = (currentDb.subjectClasses || []).filter(
+      (sc) => sc.teacherId !== teacher.id && sc.teacherName !== teacher.fullName
+    );
+
+    let updatedCurrentUser = currentDb.currentUser;
+    if (currentDb.currentUser?.id === teacher.id) {
+      updatedCurrentUser = updatedTeachers.find((x) => x.isOwner) || updatedTeachers[0] || currentDb.currentUser;
+    }
+
+    const updatedDb = {
+      ...currentDb,
+      teachers: updatedTeachers,
+      classes: updatedClasses,
+      subjectClasses: updatedSubjectClasses,
+      currentUser: updatedCurrentUser,
+    };
+
+    storage.save(updatedDb, true, {
+      category: 'Hệ thống',
+      action: 'Xóa giáo viên',
+      details: `Đã xóa giáo viên ${teacher.fullName} khỏi hệ thống.`,
+      status: 'SUCCESS',
+    });
+
+    setSuccessMessage('Đã xóa giáo viên khỏi hệ thống!');
+    setTimeout(() => {
+      setSuccessMessage('');
+      setShowDeleteConfirm(false);
+      onClose();
+    }, 800);
   };
 
   return (
@@ -330,44 +460,168 @@ export const TeacherEditModal: React.FC<TeacherEditModalProps> = ({
 
           {/* Assigned Classes */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-              <Layers className="w-3.5 h-3.5 text-purple-600" />
-              <span>Lớp được phân công phụ trách:</span>
-            </label>
-            <input
-              type="text"
-              value={assignedClassesStr}
-              onChange={(e) => setAssignedClassesStr(e.target.value)}
-              placeholder="Ví dụ: 4A, 4B hoặc 3A, 4A, 5A"
-              className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-300 rounded-xl outline-hidden focus:ring-2 focus:ring-sky-500"
-            />
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                <Layers className="w-3.5 h-3.5 text-purple-600" />
+                <span>Lớp được phân công phụ trách ({selectedClassIds.length} lớp):</span>
+              </label>
+              {selectedClassIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedClassIds([])}
+                  className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
+                >
+                  Bỏ chọn tất cả lớp
+                </button>
+              )}
+            </div>
+
+            {/* Visual class chips with direct delete button */}
+            {selectedClassIds.length > 0 ? (
+              <div className="mb-2 p-2 bg-sky-50 border border-sky-200 rounded-xl">
+                <div className="text-[11px] font-bold text-sky-800 mb-1">
+                  Các lớp đang phụ trách (Bấm ✕ để xóa lớp khỏi giáo viên này):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedClassIds.map((cid) => {
+                    const cls = db.classes.find((c) => c.id === cid);
+                    const cName = cls?.name || cid;
+                    return (
+                      <span
+                        key={cid}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white text-sky-900 rounded-lg text-xs font-bold border border-sky-300 shadow-2xs"
+                      >
+                        <span>Lớp {cName}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedClassIds((prev) => prev.filter((id) => id !== cid));
+                          }}
+                          className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full p-0.5 transition cursor-pointer"
+                          title={`Xóa Lớp ${cName} khỏi giáo viên`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="mb-2 p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 italic">
+                Chưa phân công lớp nào. Hãy chọn lớp bên dưới:
+              </div>
+            )}
+
+            {/* Quick check/uncheck available classes */}
+            <div className="grid grid-cols-3 gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200 max-h-32 overflow-y-auto">
+              {db.classes
+                .filter((c) => c.schoolYearId === db.currentSchoolYearId)
+                .map((cls) => {
+                  const isChecked = selectedClassIds.includes(cls.id);
+                  return (
+                    <label
+                      key={cls.id}
+                      className={`flex items-center gap-1.5 p-1.5 rounded-lg border text-xs cursor-pointer transition ${
+                        isChecked
+                          ? 'bg-sky-50 border-sky-300 text-sky-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isChecked) {
+                            setSelectedClassIds((prev) => prev.filter((id) => id !== cls.id));
+                          } else {
+                            setSelectedClassIds((prev) => [...prev, cls.id]);
+                          }
+                        }}
+                        className="rounded text-sky-600 cursor-pointer"
+                      />
+                      <span>Lớp {cls.name}</span>
+                    </label>
+                  );
+                })}
+            </div>
             <p className="text-[10px] text-slate-400 mt-1">
-              * GVCN phụ trách 1 lớp; GV chuyên môn phụ trách nhiều lớp khác nhau.
+              * GVCN phụ trách 1 lớp; GV chuyên môn phụ trách nhiều lớp khác nhau. Bấm dấu ✕ trên thẻ để xóa lớp khỏi giáo viên.
             </p>
           </div>
         </form>
 
         {/* Modal Footer - Fixed at Bottom with Permanent Escape and Change Buttons */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0 sticky bottom-0 z-20">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 rounded-xl transition cursor-pointer shadow-2xs"
-            title="Thoát không lưu"
-          >
-            ✕ Thoát
-          </button>
+          <div>
+            {teacher && !isRootOwnerTeacher(teacher) && (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="px-3 py-2 text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 bg-rose-50 border border-rose-200 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Xóa giáo viên này khỏi hệ thống"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa giáo viên</span>
+              </button>
+            )}
+          </div>
 
-          <button
-            type="button"
-            onClick={handleSubmit}
-            className="px-5 py-2.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
-            title="Lưu thay đổi thông tin giáo viên"
-          >
-            <Save className="w-4 h-4" />
-            <span>Lưu thay đổi</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 rounded-xl transition cursor-pointer shadow-2xs"
+              title="Thoát không lưu"
+            >
+              ✕ Thoát
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="px-5 py-2.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              title="Lưu thay đổi thông tin giáo viên"
+            >
+              <Save className="w-4 h-4" />
+              <span>Lưu thay đổi</span>
+            </button>
+          </div>
         </div>
+
+        {/* Delete confirmation dialog inside TeacherEditModal */}
+        {showDeleteConfirm && teacher && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto text-xl font-bold">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Xác nhận xóa giáo viên?</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Bạn có chắc chắn muốn xóa giáo viên{' '}
+                  <strong className="text-slate-800">{teacher.fullName}</strong> khỏi hệ thống? Dữ liệu lớp chủ nhiệm và môn giảng dạy sẽ được giải phóng an toàn.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteTeacher}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-xs cursor-pointer"
+                >
+                  Đồng ý xóa
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
