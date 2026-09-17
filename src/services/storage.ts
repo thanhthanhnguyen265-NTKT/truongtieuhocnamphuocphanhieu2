@@ -35,6 +35,7 @@ import {
 const STORAGE_KEY = 'SMART_STUDENT_MANAGER_NAM_PHUOC_V2';
 const BACKUP_STORAGE_KEY = 'SMART_STUDENT_MANAGER_BACKUP_HISTORY_V2';
 const EMERGENCY_STUDENTS_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_STUDENTS_V2';
+const EMERGENCY_TRANSACTIONS_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_TRANSACTIONS_V2';
 const FIRESTORE_COLLECTION = 'school_database';
 const FIRESTORE_DOC_ID = 'nam_phuoc_duy_phuoc_2';
 
@@ -129,6 +130,134 @@ export function mergeStudentRosters(primary: Student[], secondary: Student[]): S
   }
 
   return result;
+}
+
+/**
+ * Trộn danh sách giao dịch điểm thi đua an toàn tuyệt đối:
+ * - Bảo đảm không làm mất điểm đã nhập khi đồng bộ giữa LocalStorage và Firestore.
+ * - Hợp nhất dựa theo mã ID độc nhất của từng giao dịch (CompetitionTransaction.id).
+ */
+export function mergeTransactions(
+  primary: CompetitionTransaction[],
+  secondary: CompetitionTransaction[]
+): CompetitionTransaction[] {
+  if (!primary || primary.length === 0) return secondary || [];
+  if (!secondary || secondary.length === 0) return primary || [];
+
+  const map = new Map<string, CompetitionTransaction>();
+  // Thêm danh sách phụ trước
+  secondary.forEach((t) => {
+    if (t && t.id) map.set(t.id, t);
+  });
+  // Ghi đè/bổ sung danh sách chính lên trên
+  primary.forEach((t) => {
+    if (t && t.id) map.set(t.id, t);
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const timeA = new Date(a.createdAt || a.date).getTime() || 0;
+    const timeB = new Date(b.createdAt || b.date).getTime() || 0;
+    return timeB - timeA;
+  });
+}
+
+/**
+ * Ngày bắt đầu năm học chính thức (Tuần 1): Thứ Hai, 07/09/2026
+ */
+export const SCHOOL_YEAR_START_DATE = '2026-09-07';
+
+/**
+ * Tính số tuần học (1 - 35) từ ngày YYYY-MM-DD
+ * Quy chuẩn: Tuần 1 bắt đầu từ ngày 07/09/2026
+ */
+export function getSchoolWeekFromDate(dateStr: string, schoolYearStart = SCHOOL_YEAR_START_DATE): number {
+  try {
+    if (!dateStr) return 1;
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length < 3) return 1;
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+
+    const startParts = schoolYearStart.split('-').map(Number);
+    const startObj = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+
+    const diffMs = dateObj.getTime() - startObj.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return 1;
+    const week = Math.floor(diffDays / 7) + 1;
+    return Math.max(1, Math.min(35, week));
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Lấy tháng (1 - 12) từ ngày YYYY-MM-DD
+ */
+export function getMonthFromDate(dateStr: string): number {
+  try {
+    if (!dateStr) return new Date().getMonth() + 1;
+    const parts = dateStr.split('-');
+    if (parts.length >= 2) {
+      return parseInt(parts[1], 10);
+    }
+    return new Date(dateStr).getMonth() + 1;
+  } catch {
+    return 9;
+  }
+}
+
+/**
+ * Tính khoảng ngày của tuần học (VD: Tuần 1: 07/09 - 13/09/2026, Tuần 2: 14/09 - 20/09/2026)
+ */
+export function getDateRangeOfWeek(
+  weekNum: number,
+  schoolYearStart = SCHOOL_YEAR_START_DATE
+): { startStr: string; endStr: string; label: string } {
+  try {
+    const startParts = schoolYearStart.split('-').map(Number);
+    const startWeek = new Date(startParts[0], startParts[1] - 1, startParts[2] + (weekNum - 1) * 7);
+    const endWeek = new Date(startParts[0], startParts[1] - 1, startParts[2] + (weekNum - 1) * 7 + 6);
+
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const startStr = `${startWeek.getFullYear()}-${pad(startWeek.getMonth() + 1)}-${pad(startWeek.getDate())}`;
+    const endStr = `${endWeek.getFullYear()}-${pad(endWeek.getMonth() + 1)}-${pad(endWeek.getDate())}`;
+    const label = `${pad(startWeek.getDate())}/${pad(startWeek.getMonth() + 1)} - ${pad(endWeek.getDate())}/${pad(endWeek.getMonth() + 1)}`;
+
+    return { startStr, endStr, label };
+  } catch {
+    return { startStr: '', endStr: '', label: `Tuần ${weekNum}` };
+  }
+}
+
+/**
+ * Chuẩn hóa và tự động cập nhật tuần/tháng học cho toàn bộ giao dịch điểm thi đua:
+ * Quy chuẩn Tuần 1 bắt đầu từ ngày 07/09/2026.
+ */
+export function normalizeTransactionsSchoolWeek(
+  transactions: CompetitionTransaction[]
+): { updatedTransactions: CompetitionTransaction[]; count: number } {
+  if (!transactions || transactions.length === 0) {
+    return { updatedTransactions: [], count: 0 };
+  }
+
+  let count = 0;
+  const updatedTransactions = transactions.map((tx) => {
+    if (!tx || !tx.date) return tx;
+    const correctWeek = getSchoolWeekFromDate(tx.date, SCHOOL_YEAR_START_DATE);
+    const correctMonth = getMonthFromDate(tx.date);
+
+    if (tx.weekNumber !== correctWeek || tx.monthNumber !== correctMonth) {
+      count++;
+      return {
+        ...tx,
+        weekNumber: correctWeek,
+        monthNumber: correctMonth,
+      };
+    }
+    return tx;
+  });
+
+  return { updatedTransactions, count };
 }
 
 export const DEFAULT_SETTINGS: SchoolSettings = {
@@ -314,8 +443,22 @@ class StorageService {
         const mergedStudents = mergeStudentRosters(localStudents, remoteStudents);
         remoteData.students = mergedStudents;
 
-        if (mergedStudents.length > (remoteStudents.length || 0)) {
-          console.log(`Firebase: Syncing ${mergedStudents.length} students back to cloud database...`);
+        // SAFE MERGE: Competition Transactions (Cộng/Trừ điểm thi đua)
+        const localTransactions = this.cache?.transactions || [];
+        const remoteTransactions = remoteData.transactions || [];
+        const mergedTransactions = mergeTransactions(localTransactions, remoteTransactions);
+        
+        // Chuẩn hóa và tự động cập nhật tuần/tháng học cho toàn bộ điểm thi đua theo mốc Tuần 1 từ 07/09/2026
+        const { updatedTransactions, count: normCount } = normalizeTransactionsSchoolWeek(mergedTransactions);
+        remoteData.transactions = updatedTransactions;
+
+        const shouldSyncBack =
+          mergedStudents.length > (remoteStudents.length || 0) ||
+          mergedTransactions.length > (remoteTransactions.length || 0) ||
+          normCount > 0;
+
+        if (shouldSyncBack) {
+          console.log(`Firebase: Syncing ${mergedStudents.length} students & ${updatedTransactions.length} competition transactions (${normCount} updated to week 1 from 07/09/2026) back to cloud database...`);
           setDoc(docRef, remoteData).catch((err) => console.warn('Cloud sync merge back error:', err));
         }
 
@@ -335,8 +478,20 @@ class StorageService {
           const mergedStudents = mergeStudentRosters(localStudents, remoteStudents);
           remoteData.students = mergedStudents;
 
-          if (mergedStudents.length > (remoteStudents.length || 0)) {
-            setDoc(docRef, remoteData).catch((err) => console.warn('Sync back merged students error:', err));
+          // Reconcile competition transactions safely: never lose scored points
+          const localTransactions = this.cache?.transactions || [];
+          const remoteTransactions = remoteData.transactions || [];
+          const mergedTransactions = mergeTransactions(localTransactions, remoteTransactions);
+          const { updatedTransactions, count: normCount } = normalizeTransactionsSchoolWeek(mergedTransactions);
+          remoteData.transactions = updatedTransactions;
+
+          const shouldSyncBack =
+            mergedStudents.length > (remoteStudents.length || 0) ||
+            mergedTransactions.length > (remoteTransactions.length || 0) ||
+            normCount > 0;
+
+          if (shouldSyncBack) {
+            setDoc(docRef, remoteData).catch((err) => console.warn('Sync back merged data error:', err));
           }
 
           // Keep current logged-in user preferences locally to avoid jarring role switches
@@ -447,8 +602,45 @@ class StorageService {
     if (!parsed.evaluations || !Array.isArray(parsed.evaluations)) {
       parsed.evaluations = [];
     }
-    if (!parsed.transactions || !Array.isArray(parsed.transactions)) {
-      parsed.transactions = [];
+    if (!parsed.transactions || !Array.isArray(parsed.transactions) || parsed.transactions.length === 0) {
+      try {
+        const emergencyTx = localStorage.getItem(EMERGENCY_TRANSACTIONS_KEY);
+        if (emergencyTx) {
+          const recovered = JSON.parse(emergencyTx);
+          if (Array.isArray(recovered) && recovered.length > 0) {
+            console.log(`Restored ${recovered.length} competition transactions from emergency storage.`);
+            parsed.transactions = recovered;
+          } else {
+            parsed.transactions = [];
+          }
+        } else {
+          parsed.transactions = [];
+        }
+      } catch (e) {
+        parsed.transactions = [];
+      }
+    } else {
+      try {
+        const emergencyTx = localStorage.getItem(EMERGENCY_TRANSACTIONS_KEY);
+        if (emergencyTx) {
+          const recovered = JSON.parse(emergencyTx);
+          if (Array.isArray(recovered) && recovered.length > 0) {
+            parsed.transactions = mergeTransactions(parsed.transactions, recovered);
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Luôn chuẩn hóa tuần/tháng học cho toàn bộ các điểm thi đua đã lưu (Tuần 1 từ 07/09/2026)
+    if (parsed.transactions && Array.isArray(parsed.transactions) && parsed.transactions.length > 0) {
+      const { updatedTransactions, count } = normalizeTransactionsSchoolWeek(parsed.transactions);
+      if (count > 0) {
+        console.log(`Normalized ${count} competition transactions to start from week 1 (07/09/2026).`);
+      }
+      parsed.transactions = updatedTransactions;
+      try {
+        localStorage.setItem(EMERGENCY_TRANSACTIONS_KEY, JSON.stringify(updatedTransactions));
+      } catch (e) {}
     }
     if (!parsed.backups || !Array.isArray(parsed.backups)) {
       try {
@@ -551,10 +743,15 @@ class StorageService {
     this.isSaving = true;
 
     try {
-      // 0. Update emergency student copy if students exist to prevent data loss
+      // 0. Update emergency copies if present to prevent data loss
       if (newDb.students && newDb.students.length > 0) {
         try {
           localStorage.setItem(EMERGENCY_STUDENTS_KEY, JSON.stringify(newDb.students));
+        } catch (err) {}
+      }
+      if (newDb.transactions && newDb.transactions.length > 0) {
+        try {
+          localStorage.setItem(EMERGENCY_TRANSACTIONS_KEY, JSON.stringify(newDb.transactions));
         } catch (err) {}
       }
 
@@ -1292,6 +1489,73 @@ class StorageService {
     }
 
     return { updated: count };
+  }
+
+  /**
+   * Thêm các lượt ghi điểm thi đua mới và lưu đồng bộ tức thì
+   */
+  public async addCompetitionTransactions(newTx: CompetitionTransaction[], reason?: string): Promise<void> {
+    const db = this.getDb();
+    const updatedTransactions = mergeTransactions(newTx, db.transactions || []);
+    const updatedDb = {
+      ...db,
+      transactions: updatedTransactions,
+    };
+    try {
+      localStorage.setItem(EMERGENCY_TRANSACTIONS_KEY, JSON.stringify(updatedTransactions));
+    } catch (e) {}
+    await this.save(updatedDb, true, {
+      category: 'Thi đua',
+      action: 'Cộng/Trừ điểm thi đua',
+      details: reason || `Đã lưu ${newTx.length} lượt ghi nhận điểm thi đua.`,
+      status: 'SUCCESS',
+    });
+  }
+
+  /**
+   * Xóa một lượt điểm thi đua đã nhập
+   */
+  public async deleteCompetitionTransaction(transactionId: string): Promise<void> {
+    const db = this.getDb();
+    const target = (db.transactions || []).find((t) => t.id === transactionId);
+    const updatedTransactions = (db.transactions || []).filter((t) => t.id !== transactionId);
+    const updatedDb = {
+      ...db,
+      transactions: updatedTransactions,
+    };
+    try {
+      localStorage.setItem(EMERGENCY_TRANSACTIONS_KEY, JSON.stringify(updatedTransactions));
+    } catch (e) {}
+    await this.save(updatedDb, true, {
+      category: 'Thi đua',
+      action: 'Xóa điểm thi đua',
+      details: `Đã xóa lượt ghi điểm thi đua "${target?.criterionName || transactionId}" của học sinh.`,
+      status: 'SUCCESS',
+    });
+  }
+
+  /**
+   * Cập nhật lại toàn bộ điểm thi đua đã nhập trước đây theo mốc Tuần 1 từ 07/09/2026
+   */
+  public async migrateCompetitionTransactionsWeek(): Promise<{ updated: number; total: number }> {
+    const db = this.getDb();
+    const { updatedTransactions, count } = normalizeTransactionsSchoolWeek(db.transactions || []);
+    if (count > 0 || (db.transactions && db.transactions.length > 0)) {
+      const updatedDb = {
+        ...db,
+        transactions: updatedTransactions,
+      };
+      try {
+        localStorage.setItem(EMERGENCY_TRANSACTIONS_KEY, JSON.stringify(updatedTransactions));
+      } catch (e) {}
+      await this.save(updatedDb, true, {
+        category: 'Thi đua',
+        action: 'Cập nhật lại tuần thi đua (Tuần 1 từ 07/09/2026)',
+        details: `Đã cập nhật lại tuần học và thời gian cho ${count}/${db.transactions?.length || 0} điểm thi đua đã nhập trước đây (Tuần 1 bắt đầu từ 07/09/2026).`,
+        status: 'SUCCESS',
+      });
+    }
+    return { updated: count, total: db.transactions?.length || 0 };
   }
 }
 

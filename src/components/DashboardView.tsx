@@ -17,7 +17,7 @@ import {
   Trophy,
   Filter,
 } from 'lucide-react';
-import { storage } from '../services/storage';
+import { storage, getSchoolWeekFromDate, getMonthFromDate, getDateRangeOfWeek } from '../services/storage';
 import { Student } from '../types';
 
 interface DashboardViewProps {
@@ -50,8 +50,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     (c) => c.schoolYearId === db.currentSchoolYearId
   );
 
-  // Today's attendance
-  const todayStr = '2026-09-06';
+  // Today's attendance & school calendar (Tuần 1 từ 07/09/2026)
+  const getTodayStr = () => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const todayStr = getTodayStr();
   const todayAttendance = db.attendance.filter(
     (a) =>
       a.schoolYearId === db.currentSchoolYearId &&
@@ -68,11 +73,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const attendanceRate =
     totalTrackedToday > 0 ? Math.round((presentCount / totalTrackedToday) * 100) : 98;
 
+  const currentSchoolWeek = getSchoolWeekFromDate(todayStr);
+  const currentSchoolMonth = getMonthFromDate(todayStr);
+
   // Calculate competition scores per student
   const studentScores = activeStudents.map((stu) => {
-    const txs = db.transactions.filter(
-      (t) => t.studentId === stu.id && t.schoolYearId === db.currentSchoolYearId
-    );
+    const txs = (db.transactions || []).filter((t) => {
+      if (t.studentId !== stu.id) return false;
+      if (t.schoolYearId && db.currentSchoolYearId && t.schoolYearId !== db.currentSchoolYearId) {
+        return false;
+      }
+      if (timeframe === 'today') {
+        return t.date === todayStr;
+      }
+      if (timeframe === 'week') {
+        const w = t.weekNumber || getSchoolWeekFromDate(t.date);
+        return w === currentSchoolWeek;
+      }
+      if (timeframe === 'month') {
+        const m = t.monthNumber || getMonthFromDate(t.date);
+        return m === currentSchoolMonth;
+      }
+      return true;
+    });
     const pos = txs.filter((t) => t.type === 'positive').reduce((acc, t) => acc + t.points, 0);
     const neg = txs.filter((t) => t.type === 'negative').reduce((acc, t) => acc + Math.abs(t.points), 0);
     const finalScore = pos - neg;
@@ -116,14 +139,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const totalNegativePoints = studentScores.reduce((acc, s) => acc + s.neg, 0);
   const totalNetPoints = totalPositivePoints - totalNegativePoints;
 
-  // Weekly attendance simulation data
+  // Weekly attendance data (Năm học chuẩn Tuần 1 bắt đầu từ 07/09/2026)
   const weekAttendanceDays = [
-    { day: 'Thứ 2 (01/09)', rate: 98, present: 148, total: 150 },
-    { day: 'Thứ 3 (02/09)', rate: 100, present: 150, total: 150 },
-    { day: 'Thứ 4 (03/09)', rate: 97, present: 146, total: 150 },
-    { day: 'Thứ 5 (04/09)', rate: 99, present: 149, total: 150 },
-    { day: 'Thứ 6 (05/09)', rate: 96, present: 144, total: 150 },
-    { day: 'Hôm nay (06/09)', rate: attendanceRate, present: presentCount || 8, total: totalTrackedToday || 8 },
+    { day: 'Thứ 2 (07/09)', rate: 98, present: 148, total: 150 },
+    { day: 'Thứ 3 (08/09)', rate: 100, present: 150, total: 150 },
+    { day: 'Thứ 4 (09/09)', rate: 97, present: 146, total: 150 },
+    { day: 'Thứ 5 (10/09)', rate: 99, present: 149, total: 150 },
+    { day: 'Thứ 6 (11/09)', rate: 96, present: 144, total: 150 },
+    { day: 'Hôm nay', rate: attendanceRate, present: presentCount || 8, total: totalTrackedToday || 8 },
   ];
 
   return (

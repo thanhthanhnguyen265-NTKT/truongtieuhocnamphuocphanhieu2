@@ -175,11 +175,13 @@ export interface CompetitionTransaction {
   criterionName: string;
   points: number;
   date: string;
+  weekNumber?: number;
+  monthNumber?: number;
   note?: string;
   teacherId: string;
   teacherName: string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export interface Badge {

@@ -34,11 +34,11 @@ export const INITIAL_SCHOOL_YEARS: SchoolYear[] = [
   {
     id: 'SY2026_2027',
     name: '2026–2027',
-    startDate: '2026-09-05',
+    startDate: '2026-09-07',
     endDate: '2027-05-31',
     isCurrent: true,
     status: 'active',
-    notes: 'Năm học hiện tại đang diễn ra',
+    notes: 'Năm học hiện tại đang diễn ra (Tuần 1 bắt đầu từ 07/09/2026)',
   },
   {
     id: 'SY2027_2028',

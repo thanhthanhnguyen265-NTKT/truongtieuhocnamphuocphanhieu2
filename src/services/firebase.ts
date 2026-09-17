@@ -33,16 +33,35 @@ export const firestore = firestoreInstance;
 // Auto sign-in anonymously for persistence & security
 export async function ensureAuthUser(): Promise<User | null> {
   return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(auth.currentUser);
+      }
+    }, 2500);
+
     onAuthStateChanged(auth, async (user) => {
+      if (resolved) return;
       if (user) {
+        resolved = true;
+        clearTimeout(timer);
         resolve(user);
       } else {
         try {
           const cred = await signInAnonymously(auth);
-          resolve(cred.user);
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            resolve(cred.user);
+          }
         } catch (e) {
           console.warn('Anonymous sign-in skipped/failed:', e);
-          resolve(null);
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            resolve(null);
+          }
         }
       }
     });

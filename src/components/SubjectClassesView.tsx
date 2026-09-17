@@ -40,7 +40,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { storage } from '../services/storage';
+import { storage, getSchoolWeekFromDate, getMonthFromDate } from '../services/storage';
 import {
   SubjectClass,
   Student,
@@ -630,6 +630,8 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
           criterionName: crit.name,
           points: crit.points,
           date: today,
+          weekNumber: getSchoolWeekFromDate(today),
+          monthNumber: getMonthFromDate(today),
           note: scoringNote.trim()
             ? `[Môn ${activeClass.subject}] ${scoringNote.trim()}`
             : `[Môn ${activeClass.subject}] ${crit.name}`,
