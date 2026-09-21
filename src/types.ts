@@ -313,6 +313,7 @@ export interface SubjectClassEvaluation {
   studentId: string;
   semester: 'HK1' | 'HK2';
   period?: 'Giữa kỳ' | 'Cuối kỳ';
+  month?: number; // 9, 10, 11, 12, 1, 2, 3, 4, 5
   level: 'T' | 'H' | 'C';
   score?: number;
   note: string;

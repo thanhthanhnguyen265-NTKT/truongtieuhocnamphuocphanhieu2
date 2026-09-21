@@ -38,8 +38,10 @@ import {
   FolderPlus,
   ChevronLeft,
   RefreshCw,
+  Printer,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { SubjectTeacherMonthlyReport } from './SubjectTeacherMonthlyReport';
 import { storage, getSchoolWeekFromDate, getMonthFromDate } from '../services/storage';
 import {
   SubjectClass,
@@ -267,9 +269,9 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
     notes: '',
   });
 
-  // 3 Primary Sub-modes inside an active subject class
+  // 4 Primary Sub-modes inside an active subject class
   const [assessmentMode, setAssessmentMode] = useState<
-    'evaluation' | 'attendance' | 'competition'
+    'evaluation' | 'attendance' | 'competition' | 'monthlyReport'
   >('evaluation');
 
   // Evaluation states (Kỳ 1 / Kỳ 2)
@@ -1371,13 +1373,27 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+                      <div className="pt-4 mt-4 border-t border-slate-100 flex items-center gap-2">
                         <button
-                          onClick={() => setActiveClassId(cls.id)}
-                          className="w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+                          onClick={() => {
+                            setActiveClassId(cls.id);
+                            setAssessmentMode('evaluation');
+                          }}
+                          className="flex-1 py-2 px-3 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
                         >
-                          <span>Vào Sổ Đánh Giá, Điểm Danh & Thi Đua</span>
+                          <span>Vào Sổ Lớp</span>
                           <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setActiveClassId(cls.id);
+                            setAssessmentMode('monthlyReport');
+                          }}
+                          className="py-2 px-3 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+                          title="Xem và xuất báo cáo thi đua & nhận xét tháng của lớp này"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-purple-600" />
+                          <span>Báo cáo tháng</span>
                         </button>
                       </div>
                     </div>
@@ -1416,6 +1432,21 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
                 className="px-3.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
               >
                 ← Quay lại danh sách
+              </button>
+
+              {/* Nút Mở Báo Cáo Tháng */}
+              <button
+                type="button"
+                onClick={() => setAssessmentMode('monthlyReport')}
+                className={`px-3 py-2 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
+                  assessmentMode === 'monthlyReport'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200'
+                }`}
+                title="Mở bảng tổng hợp và xuất báo cáo thi đua & nhận xét theo tháng dành cho GV bộ môn"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Báo Cáo Theo Tháng</span>
               </button>
 
               {/* Nút Xuất Word (.doc) */}
@@ -1488,6 +1519,21 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
               >
                 <Award className="w-4 h-4" />
                 <span>3. Tiêu chí cộng / trừ thi đua điểm môn</span>
+              </button>
+
+              <button
+                onClick={() => setAssessmentMode('monthlyReport')}
+                className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer ${
+                  assessmentMode === 'monthlyReport'
+                    ? 'bg-white text-purple-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Printer className="w-4 h-4 text-purple-600" />
+                <span>4. Báo cáo theo tháng (Thi đua & Nhận xét GVBM)</span>
+                <span className="px-1.5 py-0.5 text-[10px] bg-purple-100 text-purple-800 rounded-full font-extrabold">
+                  Mới
+                </span>
               </button>
             </div>
           </div>
@@ -2331,6 +2377,18 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
                 </table>
               </div>
             </div>
+          )}
+
+          {/* ========================================================= */}
+          {/* TAB 4: BÁO CÁO THEO THÁNG DÀNH RIÊNG CHO GV BỘ MÔN       */}
+          {/* ========================================================= */}
+          {assessmentMode === 'monthlyReport' && activeClass && (
+            <SubjectTeacherMonthlyReport
+              subjectClass={activeClass}
+              students={activeClassStudents}
+              db={db}
+              onRefresh={() => setDb({ ...storage.getDb() })}
+            />
           )}
         </div>
       )}

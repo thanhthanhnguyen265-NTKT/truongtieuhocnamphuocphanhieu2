@@ -310,15 +310,15 @@ export function generateOfficialReportHtml(
     <div class="footer-signatures">
       <div class="signature-col">
         <div class="location-date">&nbsp;</div>
-        <div class="role-title">NGƯỜI LẬP BÁO CÁO / GIÁO VIÊN</div>
+        <div class="role-title">${options.creatorTitle || options.signerTitle || 'NGƯỜI LẬP BÁO CÁO / GIÁO VIÊN'}</div>
         <div class="role-sub">(Ký và ghi rõ họ tên)</div>
         <div class="signature-name">${creatorName}</div>
       </div>
       <div class="signature-col">
         <div class="location-date">Nam Phước, ngày ${day} tháng ${month} năm ${year}</div>
-        <div class="role-title">HIỆU TRƯỞNG / PHÂN HIỆU TRƯỞNG</div>
+        <div class="role-title">${options.reviewerTitle || 'HIỆU TRƯỞNG / PHÂN HIỆU TRƯỞNG'}</div>
         <div class="role-sub">(Ký, đóng dấu và ghi rõ họ tên)</div>
-        <div class="signature-name">${settings.principalName || 'Ban Giám Hiệu'}</div>
+        <div class="signature-name">${options.reviewerName || settings.principalName || 'Ban Giám Hiệu'}</div>
       </div>
     </div>
 
