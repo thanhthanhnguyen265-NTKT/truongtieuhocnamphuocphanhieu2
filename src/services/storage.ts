@@ -21,6 +21,7 @@ import {
   PermissionRequest,
   MonthlyAssessmentTT27,
   SubjectClass,
+  MonthlyReportEditArchive,
   DatabaseBackup,
   AppDatabase,
 } from '../types';
@@ -36,6 +37,9 @@ const STORAGE_KEY = 'SMART_STUDENT_MANAGER_NAM_PHUOC_V2';
 const BACKUP_STORAGE_KEY = 'SMART_STUDENT_MANAGER_BACKUP_HISTORY_V2';
 const EMERGENCY_STUDENTS_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_STUDENTS_V2';
 const EMERGENCY_TRANSACTIONS_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_TRANSACTIONS_V2';
+const EMERGENCY_MONTHLY_ASSESSMENTS_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_MONTHLY_ASSESSMENTS_V2';
+const EMERGENCY_SUBJECT_CLASSES_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_SUBJECT_CLASSES_V2';
+const EMERGENCY_MONTHLY_ARCHIVES_KEY = 'SMART_STUDENT_MANAGER_EMERGENCY_MONTHLY_ARCHIVES_V2';
 const FIRESTORE_COLLECTION = 'school_database';
 const FIRESTORE_DOC_ID = 'nam_phuoc_duy_phuoc_2';
 
@@ -157,6 +161,138 @@ export function mergeTransactions(
   return Array.from(map.values()).sort((a, b) => {
     const timeA = new Date(a.createdAt || a.date).getTime() || 0;
     const timeB = new Date(b.createdAt || b.date).getTime() || 0;
+    return timeB - timeA;
+  });
+}
+
+/**
+ * Trộn danh sách nhận xét Thông tư 27 theo tháng an toàn tuyệt đối:
+ * - Bảo đảm không làm mất nhận xét tháng đã chỉnh sửa khi đồng bộ giữa LocalStorage và Firestore.
+ * - Hợp nhất theo studentId + month.
+ */
+export function mergeMonthlyAssessments(
+  primary: MonthlyAssessmentTT27[],
+  secondary: MonthlyAssessmentTT27[]
+): MonthlyAssessmentTT27[] {
+  if (!primary || primary.length === 0) return secondary || [];
+  if (!secondary || secondary.length === 0) return primary || [];
+
+  const map = new Map<string, MonthlyAssessmentTT27>();
+
+  const getRecordKey = (m: MonthlyAssessmentTT27) => {
+    const sId = m.studentId || '';
+    const mNum = Number(m.month) || 9;
+    const yId = m.schoolYearId || 'SY2026_2027';
+    return `${sId}_M${mNum}_${yId}`;
+  };
+
+  // Add secondary first
+  secondary.forEach((m) => {
+    if (m && m.studentId) map.set(getRecordKey(m), m);
+  });
+
+  // Merge or overwrite with primary
+  primary.forEach((m) => {
+    if (!m || !m.studentId) return;
+    const key = getRecordKey(m);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, m);
+    } else {
+      // Merge subjects dictionary and keep newer updatedAt
+      const timeM = new Date(m.updatedAt || 0).getTime();
+      const timeEx = new Date(existing.updatedAt || 0).getTime();
+      const baseRec = timeM >= timeEx ? m : existing;
+      const otherRec = timeM >= timeEx ? existing : m;
+
+      map.set(key, {
+        ...baseRec,
+        subjects: {
+          ...(otherRec.subjects || {}),
+          ...(baseRec.subjects || {}),
+        },
+      });
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+/**
+ * Trộn danh sách Lớp bộ môn & các đánh giá báo cáo tháng an toàn:
+ * - Giữ nguyên toàn bộ evaluations (gồm cả tháng và học kỳ) không bị đè mất.
+ */
+export function mergeSubjectClasses(
+  primary: SubjectClass[],
+  secondary: SubjectClass[]
+): SubjectClass[] {
+  if (!primary || primary.length === 0) return secondary || [];
+  if (!secondary || secondary.length === 0) return primary || [];
+
+  const map = new Map<string, SubjectClass>();
+
+  secondary.forEach((c) => {
+    if (c && c.id) map.set(c.id, c);
+  });
+
+  primary.forEach((p) => {
+    if (!p || !p.id) return;
+    const existing = map.get(p.id);
+    if (!existing) {
+      map.set(p.id, p);
+    } else {
+      // Merge evaluations safely
+      const evalMap = new Map<string, any>();
+      (existing.evaluations || []).forEach((ev) => {
+        const k = ev.month ? `${ev.studentId}_M${ev.month}` : `${ev.studentId}_${ev.semester}_${ev.period || ''}`;
+        evalMap.set(k, ev);
+      });
+      (p.evaluations || []).forEach((ev) => {
+        const k = ev.month ? `${ev.studentId}_M${ev.month}` : `${ev.studentId}_${ev.semester}_${ev.period || ''}`;
+        evalMap.set(k, ev);
+      });
+
+      // Merge attendance days
+      const attMap = new Map<string, any>();
+      (existing.attendanceDays || []).forEach((ad) => attMap.set(ad.date, ad));
+      (p.attendanceDays || []).forEach((ad) => attMap.set(ad.date, ad));
+
+      const timeP = new Date(p.updatedAt || 0).getTime();
+      const timeEx = new Date(existing.updatedAt || 0).getTime();
+      const baseCls = timeP >= timeEx ? p : existing;
+
+      map.set(p.id, {
+        ...baseCls,
+        evaluations: Array.from(evalMap.values()),
+        attendanceDays: Array.from(attMap.values()),
+      });
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+/**
+ * Trộn kho lưu trữ báo cáo tháng đã chỉnh sửa:
+ */
+export function mergeMonthlyReportArchives(
+  primary: MonthlyReportEditArchive[],
+  secondary: MonthlyReportEditArchive[]
+): MonthlyReportEditArchive[] {
+  if (!primary || primary.length === 0) return secondary || [];
+  if (!secondary || secondary.length === 0) return primary || [];
+
+  const map = new Map<string, MonthlyReportEditArchive>();
+  secondary.forEach((a) => {
+    if (a && a.id) map.set(a.id, a);
+  });
+  primary.forEach((a) => {
+    if (a && a.id) map.set(a.id, a);
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const timeA = new Date(a.editedAt).getTime() || 0;
+    const timeB = new Date(b.editedAt).getTime() || 0;
     return timeB - timeA;
   });
 }
@@ -452,9 +588,27 @@ class StorageService {
         const { updatedTransactions, count: normCount } = normalizeTransactionsSchoolWeek(mergedTransactions);
         remoteData.transactions = updatedTransactions;
 
+        // SAFE MERGE: Monthly Assessments TT27 (Nhận xét theo tháng)
+        const localMonthly = this.cache?.monthlyAssessments || [];
+        const remoteMonthly = remoteData.monthlyAssessments || [];
+        remoteData.monthlyAssessments = mergeMonthlyAssessments(localMonthly, remoteMonthly);
+
+        // SAFE MERGE: Subject Classes & Monthly Evaluations (Lớp bộ môn & đánh giá tháng)
+        const localSubjectClasses = this.cache?.subjectClasses || [];
+        const remoteSubjectClasses = remoteData.subjectClasses || [];
+        remoteData.subjectClasses = mergeSubjectClasses(localSubjectClasses, remoteSubjectClasses);
+
+        // SAFE MERGE: Monthly Report Archives (Kho lưu trữ chỉnh sửa báo cáo theo tháng)
+        const localArchives = this.cache?.monthlyReportArchives || [];
+        const remoteArchives = remoteData.monthlyReportArchives || [];
+        remoteData.monthlyReportArchives = mergeMonthlyReportArchives(localArchives, remoteArchives);
+
         const shouldSyncBack =
           mergedStudents.length > (remoteStudents.length || 0) ||
           mergedTransactions.length > (remoteTransactions.length || 0) ||
+          (remoteData.monthlyAssessments?.length || 0) > (remoteMonthly.length || 0) ||
+          (remoteData.subjectClasses?.length || 0) > (remoteSubjectClasses.length || 0) ||
+          (remoteData.monthlyReportArchives?.length || 0) > (remoteArchives.length || 0) ||
           normCount > 0;
 
         if (shouldSyncBack) {
@@ -485,9 +639,27 @@ class StorageService {
           const { updatedTransactions, count: normCount } = normalizeTransactionsSchoolWeek(mergedTransactions);
           remoteData.transactions = updatedTransactions;
 
+          // Reconcile monthly assessments safely
+          const localMonthly = this.cache?.monthlyAssessments || [];
+          const remoteMonthly = remoteData.monthlyAssessments || [];
+          remoteData.monthlyAssessments = mergeMonthlyAssessments(localMonthly, remoteMonthly);
+
+          // Reconcile subject classes safely
+          const localSubjectClasses = this.cache?.subjectClasses || [];
+          const remoteSubjectClasses = remoteData.subjectClasses || [];
+          remoteData.subjectClasses = mergeSubjectClasses(localSubjectClasses, remoteSubjectClasses);
+
+          // Reconcile monthly report archives safely
+          const localArchives = this.cache?.monthlyReportArchives || [];
+          const remoteArchives = remoteData.monthlyReportArchives || [];
+          remoteData.monthlyReportArchives = mergeMonthlyReportArchives(localArchives, remoteArchives);
+
           const shouldSyncBack =
             mergedStudents.length > (remoteStudents.length || 0) ||
             mergedTransactions.length > (remoteTransactions.length || 0) ||
+            (remoteData.monthlyAssessments?.length || 0) > (remoteMonthly.length || 0) ||
+            (remoteData.subjectClasses?.length || 0) > (remoteSubjectClasses.length || 0) ||
+            (remoteData.monthlyReportArchives?.length || 0) > (remoteArchives.length || 0) ||
             normCount > 0;
 
           if (shouldSyncBack) {
@@ -587,11 +759,88 @@ class StorageService {
       parsed.settings.address = normalizeStudentAddress(parsed.settings.address);
       parsed.settings.district = 'Xã Nam Phước';
     }
-    if (!parsed.monthlyAssessments || !Array.isArray(parsed.monthlyAssessments)) {
-      parsed.monthlyAssessments = [];
+    if (!parsed.monthlyAssessments || !Array.isArray(parsed.monthlyAssessments) || parsed.monthlyAssessments.length === 0) {
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_MONTHLY_ASSESSMENTS_KEY);
+        if (emergency) {
+          const rec = JSON.parse(emergency);
+          if (Array.isArray(rec) && rec.length > 0) {
+            parsed.monthlyAssessments = rec;
+          } else {
+            parsed.monthlyAssessments = [];
+          }
+        } else {
+          parsed.monthlyAssessments = [];
+        }
+      } catch (e) {
+        parsed.monthlyAssessments = [];
+      }
+    } else {
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_MONTHLY_ASSESSMENTS_KEY);
+        if (emergency) {
+          const rec = JSON.parse(emergency);
+          if (Array.isArray(rec) && rec.length > 0) {
+            parsed.monthlyAssessments = mergeMonthlyAssessments(parsed.monthlyAssessments, rec);
+          }
+        }
+      } catch (e) {}
     }
-    if (!parsed.subjectClasses || !Array.isArray(parsed.subjectClasses)) {
-      parsed.subjectClasses = [];
+
+    if (!parsed.subjectClasses || !Array.isArray(parsed.subjectClasses) || parsed.subjectClasses.length === 0) {
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_SUBJECT_CLASSES_KEY);
+        if (emergency) {
+          const rec = JSON.parse(emergency);
+          if (Array.isArray(rec) && rec.length > 0) {
+            parsed.subjectClasses = rec;
+          } else {
+            parsed.subjectClasses = [];
+          }
+        } else {
+          parsed.subjectClasses = [];
+        }
+      } catch (e) {
+        parsed.subjectClasses = [];
+      }
+    } else {
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_SUBJECT_CLASSES_KEY);
+        if (emergency) {
+          const rec = JSON.parse(emergency);
+          if (Array.isArray(rec) && rec.length > 0) {
+            parsed.subjectClasses = mergeSubjectClasses(parsed.subjectClasses, rec);
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!parsed.monthlyReportArchives || !Array.isArray(parsed.monthlyReportArchives) || parsed.monthlyReportArchives.length === 0) {
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_MONTHLY_ARCHIVES_KEY);
+        if (emergency) {
+          const rec = JSON.parse(emergency);
+          if (Array.isArray(rec) && rec.length > 0) {
+            parsed.monthlyReportArchives = rec;
+          } else {
+            parsed.monthlyReportArchives = [];
+          }
+        } else {
+          parsed.monthlyReportArchives = [];
+        }
+      } catch (e) {
+        parsed.monthlyReportArchives = [];
+      }
+    } else {
+      try {
+        const emergency = localStorage.getItem(EMERGENCY_MONTHLY_ARCHIVES_KEY);
+        if (emergency) {
+          const rec = JSON.parse(emergency);
+          if (Array.isArray(rec) && rec.length > 0) {
+            parsed.monthlyReportArchives = mergeMonthlyReportArchives(parsed.monthlyReportArchives, rec);
+          }
+        }
+      } catch (e) {}
     }
     if (!parsed.attendance || !Array.isArray(parsed.attendance)) {
       parsed.attendance = [];
@@ -752,6 +1001,21 @@ class StorageService {
       if (newDb.transactions && newDb.transactions.length > 0) {
         try {
           localStorage.setItem(EMERGENCY_TRANSACTIONS_KEY, JSON.stringify(newDb.transactions));
+        } catch (err) {}
+      }
+      if (newDb.monthlyAssessments && newDb.monthlyAssessments.length > 0) {
+        try {
+          localStorage.setItem(EMERGENCY_MONTHLY_ASSESSMENTS_KEY, JSON.stringify(newDb.monthlyAssessments));
+        } catch (err) {}
+      }
+      if (newDb.subjectClasses && newDb.subjectClasses.length > 0) {
+        try {
+          localStorage.setItem(EMERGENCY_SUBJECT_CLASSES_KEY, JSON.stringify(newDb.subjectClasses));
+        } catch (err) {}
+      }
+      if (newDb.monthlyReportArchives && newDb.monthlyReportArchives.length > 0) {
+        try {
+          localStorage.setItem(EMERGENCY_MONTHLY_ARCHIVES_KEY, JSON.stringify(newDb.monthlyReportArchives));
         } catch (err) {}
       }
 
@@ -1065,13 +1329,24 @@ class StorageService {
     const db = this.getDb();
     const existing = db.monthlyAssessments || [];
     const index = existing.findIndex(
-      (m) => m.studentId === record.studentId && m.month === record.month && m.schoolYearId === record.schoolYearId
+      (m) =>
+        m.studentId === record.studentId &&
+        Number(m.month) === Number(record.month) &&
+        (!m.schoolYearId || !record.schoolYearId || m.schoolYearId === record.schoolYearId)
     );
 
     let updated: MonthlyAssessmentTT27[];
     if (index >= 0) {
       updated = [...existing];
-      updated[index] = { ...record, updatedAt: new Date().toISOString() };
+      updated[index] = {
+        ...existing[index],
+        ...record,
+        subjects: {
+          ...(existing[index].subjects || {}),
+          ...(record.subjects || {}),
+        },
+        updatedAt: new Date().toISOString(),
+      };
     } else {
       updated = [
         ...existing,
@@ -1092,6 +1367,81 @@ class StorageService {
         details: `Đã cập nhật nhận xét Thông tư 27 cho học sinh ${record.studentName || record.studentId} Tháng ${record.month}.`,
       }
     );
+  }
+
+  /**
+   * Lưu kho lưu trữ chỉnh sửa báo cáo tháng (theo lớp và theo tháng)
+   */
+  public saveMonthlyReportArchive(archive: MonthlyReportEditArchive): void {
+    const db = this.getDb();
+    const existing = db.monthlyReportArchives || [];
+    const index = existing.findIndex((a) => a.id === archive.id);
+    let updated: MonthlyReportEditArchive[];
+    if (index >= 0) {
+      updated = [...existing];
+      updated[index] = { ...archive, editedAt: new Date().toISOString() };
+    } else {
+      updated = [
+        {
+          ...archive,
+          id: archive.id || `ARCHIVE_M${archive.month}_${archive.classId}_${Date.now()}`,
+          editedAt: new Date().toISOString(),
+        },
+        ...existing,
+      ];
+    }
+
+    this.save(
+      { ...db, monthlyReportArchives: updated },
+      true,
+      {
+        category: 'Báo cáo tháng',
+        action: `Lưu trữ báo cáo Tháng ${archive.month}`,
+        details: `Đã lưu trữ bản chỉnh sửa báo cáo Tháng ${archive.month} lớp ${archive.className} (Môn: ${archive.subject || 'Tổng hợp'}).`,
+      }
+    );
+  }
+
+  /**
+   * Xóa bản lưu trữ báo cáo tháng
+   */
+  public deleteMonthlyReportArchive(archiveId: string): void {
+    const db = this.getDb();
+    const existing = db.monthlyReportArchives || [];
+    const updated = existing.filter((a) => a.id !== archiveId);
+    this.save(
+      { ...db, monthlyReportArchives: updated },
+      true,
+      {
+        category: 'Báo cáo tháng',
+        action: 'Xóa bản lưu trữ báo cáo tháng',
+        details: `Đã xóa bản lưu trữ báo cáo tháng có mã ${archiveId}.`,
+      }
+    );
+  }
+
+  /**
+   * Lấy danh sách các bản lưu trữ báo cáo tháng
+   */
+  public getMonthlyReportArchives(filter?: {
+    classId?: string;
+    month?: number;
+    subject?: string;
+  }): MonthlyReportEditArchive[] {
+    const db = this.getDb();
+    let list = db.monthlyReportArchives || [];
+    if (filter) {
+      if (filter.classId && filter.classId !== 'all') {
+        list = list.filter((a) => a.classId === filter.classId);
+      }
+      if (filter.month && filter.month > 0) {
+        list = list.filter((a) => Number(a.month) === Number(filter.month));
+      }
+      if (filter.subject && filter.subject !== 'all') {
+        list = list.filter((a) => a.subject === filter.subject);
+      }
+    }
+    return list.sort((a, b) => new Date(b.editedAt).getTime() - new Date(a.editedAt).getTime());
   }
 
   /**

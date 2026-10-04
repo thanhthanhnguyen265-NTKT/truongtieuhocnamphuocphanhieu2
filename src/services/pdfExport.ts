@@ -295,7 +295,11 @@ export function generateOfficialReportHtml(
             ${row
               .map((cell, idx) => {
                 const isNumeric = typeof cell === 'number' || (idx === 0 && !isNaN(Number(cell)));
-                return `<td class="${isNumeric ? 'text-center' : ''}">${cell ?? ''}</td>`;
+                let formatted = cell ?? '';
+                if (formatted === 'C' || formatted === 'c') {
+                  formatted = '<span style="color: #dc2626; font-weight: bold;">C (Chưa đạt chuẩn)</span>';
+                }
+                return `<td class="${isNumeric ? 'text-center' : ''}">${formatted}</td>`;
               })
               .join('')}
           </tr>

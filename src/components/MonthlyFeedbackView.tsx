@@ -20,9 +20,12 @@ import {
   HelpCircle,
   X,
   Share2,
+  Archive,
+  Trash2,
+  History,
 } from 'lucide-react';
 import { storage } from '../services/storage';
-import { MonthlyAssessmentTT27, Student, ClassRoom } from '../types';
+import { MonthlyAssessmentTT27, Student, ClassRoom, MonthlyReportEditArchive } from '../types';
 import { ChibiAvatar } from '../data/chibiAvatars';
 
 // Thông tư 27: Khung thời gian từ Tháng 9 đến Tháng 5
@@ -144,6 +147,10 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
   const [showSuggestionModal, setShowSuggestionModal] = useState(false);
   const [suggestionTargetField, setSuggestionTargetField] = useState<'generalComment' | 'praiseNote' | 'supportMeasure'>('generalComment');
 
+  // Archive modal state
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveFilterMonth, setArchiveFilterMonth] = useState<number | 'all'>('all');
+
   useEffect(() => {
     const unsub = storage.subscribe(() => {
       setDb({ ...storage.getDb() });
@@ -165,29 +172,69 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
 
   // Get or initialize assessment record for a student
   const getAssessment = (student: Student): MonthlyAssessmentTT27 => {
+    // 1. Tìm bản ghi đã lưu trong sổ nhận xét Thông tư 27 (db.monthlyAssessments)
     const existing = (db.monthlyAssessments || []).find(
       (m) =>
         m.studentId === student.id &&
-        m.month === selectedMonth &&
-        m.schoolYearId === db.currentSchoolYearId
+        Number(m.month) === Number(selectedMonth) &&
+        (!m.schoolYearId || !db.currentSchoolYearId || m.schoolYearId === db.currentSchoolYearId || m.schoolYearId === 'SY2026_2027')
     );
 
-    if (existing) return existing;
+    // Bảng môn học khởi tạo
+    const subjectsMap: Record<string, { level: 'T' | 'H' | 'C'; note?: string }> = existing
+      ? { ...existing.subjects }
+      : {};
 
-    // Default TT27 template
-    const defaultSubjects: Record<string, { level: 'T' | 'H' | 'C'; note?: string }> = {};
     TT27_SUBJECTS.forEach((sub) => {
-      defaultSubjects[sub] = { level: 'H' };
+      if (!subjectsMap[sub]) {
+        subjectsMap[sub] = { level: 'H' };
+      }
     });
 
+    // 2. Hợp nhất nhận xét & mức đánh giá từ các lớp bộ môn (db.subjectClasses)
+    (db.subjectClasses || []).forEach((sc) => {
+      const ev = (sc.evaluations || []).find(
+        (e) => e.studentId === student.id && Number(e.month) === Number(selectedMonth)
+      );
+      if (ev) {
+        subjectsMap[sc.subject] = {
+          level: (ev.level as 'T' | 'H' | 'C') || subjectsMap[sc.subject]?.level || 'H',
+          note: ev.note || subjectsMap[sc.subject]?.note || '',
+        };
+      }
+    });
+
+    // 3. Hợp nhất từ kho lưu trữ bản chỉnh sửa báo cáo tháng (db.monthlyReportArchives)
+    const classArch = (db.monthlyReportArchives || []).find(
+      (a) =>
+        Number(a.month) === Number(selectedMonth) &&
+        (a.classId === student.currentClassId || a.className === currentClass?.name)
+    );
+    if (classArch?.records) {
+      const archRow = classArch.records.find((r) => r.studentId === student.id);
+      if (archRow && classArch.subject && classArch.subject !== 'Tổng hợp') {
+        subjectsMap[classArch.subject] = {
+          level: (archRow.level as 'T' | 'H' | 'C') || subjectsMap[classArch.subject]?.level || 'H',
+          note: archRow.note || subjectsMap[classArch.subject]?.note || '',
+        };
+      }
+    }
+
+    if (existing) {
+      return {
+        ...existing,
+        subjects: subjectsMap,
+      };
+    }
+
     return {
-      id: `MA_${student.id}_M${selectedMonth}_${db.currentSchoolYearId}`,
+      id: `MA_${student.id}_M${selectedMonth}_${db.currentSchoolYearId || 'SY2026_2027'}`,
       studentId: student.id,
       studentName: student.fullName,
       classId: student.currentClassId,
-      schoolYearId: db.currentSchoolYearId,
+      schoolYearId: db.currentSchoolYearId || 'SY2026_2027',
       month: selectedMonth,
-      subjects: defaultSubjects,
+      subjects: subjectsMap,
       qualities: {
         yeuNuoc: 'Đ',
         nhanAi: 'Đ',
@@ -297,6 +344,18 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
       'Giáo viên nhận xét',
     ];
 
+    const formatLvl = (lvl?: string) => {
+      if (lvl === 'C') return 'C (Chưa đạt chuẩn)';
+      if (lvl === 'T') return 'T (Hoàn thành tốt)';
+      return lvl || 'H (Hoàn thành)';
+    };
+
+    const formatCriteria = (val?: string) => {
+      if (val === 'C') return 'C (Chưa đạt chuẩn)';
+      if (val === 'T') return 'T (Tốt)';
+      return val || 'Đ (Đạt)';
+    };
+
     const rows = studentsInClass.map((stu, idx) => {
       const ass = getAssessment(stu);
       return [
@@ -306,18 +365,18 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
         stu.gender,
         `"${currentClass?.name || stu.currentClassId}"`,
         `"Tháng ${selectedMonth}"`,
-        ass.subjects['Tiếng Việt']?.level || 'H',
-        ass.subjects['Toán']?.level || 'H',
-        ass.subjects['Tiếng Anh']?.level || 'H',
-        ass.subjects['Tin học']?.level || 'H',
-        ass.qualities.yeuNuoc,
-        ass.qualities.nhanAi,
-        ass.qualities.chamChi,
-        ass.qualities.trungThuc,
-        ass.qualities.trachNhiem,
-        ass.competencies.tuChuTuHoc,
-        ass.competencies.giaoTiepHopTac,
-        ass.competencies.giaiQuyetVanDe,
+        `"${formatLvl(ass.subjects['Tiếng Việt']?.level)}"`,
+        `"${formatLvl(ass.subjects['Toán']?.level)}"`,
+        `"${formatLvl(ass.subjects['Tiếng Anh']?.level)}"`,
+        `"${formatLvl(ass.subjects['Tin học']?.level)}"`,
+        `"${formatCriteria(ass.qualities.yeuNuoc)}"`,
+        `"${formatCriteria(ass.qualities.nhanAi)}"`,
+        `"${formatCriteria(ass.qualities.chamChi)}"`,
+        `"${formatCriteria(ass.qualities.trungThuc)}"`,
+        `"${formatCriteria(ass.qualities.trachNhiem)}"`,
+        `"${formatCriteria(ass.competencies.tuChuTuHoc)}"`,
+        `"${formatCriteria(ass.competencies.giaoTiepHopTac)}"`,
+        `"${formatCriteria(ass.competencies.giaiQuyetVanDe)}"`,
         `"${(ass.generalComment || '').replace(/"/g, '""')}"`,
         `"${(ass.praiseNote || '').replace(/"/g, '""')}"`,
         `"${(ass.supportMeasure || '').replace(/"/g, '""')}"`,
@@ -357,8 +416,17 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2">
           <button
+            onClick={() => setShowArchiveModal(true)}
+            className="px-3.5 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="Xem kho lưu trữ các bản nhận xét báo cáo tháng đã chỉnh sửa"
+          >
+            <Archive className="w-4 h-4" />
+            <span>Kho Lưu Trữ Báo Cáo ({db.monthlyReportArchives?.length || 0})</span>
+          </button>
+
+          <button
             onClick={handleExportExcel}
-            className="px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs"
+            className="px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
           >
             <DownloadCloud className="w-4 h-4" />
             <span>Xuất Excel Tháng {selectedMonth}</span>
@@ -366,7 +434,7 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
 
           <button
             onClick={() => setShowPrintModal(true)}
-            className="px-3.5 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs"
+            className="px-3.5 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
           >
             <Printer className="w-4 h-4" />
             <span>In Phiếu Nhận Xét</span>
@@ -1321,6 +1389,186 @@ export const MonthlyFeedbackView: React.FC<MonthlyFeedbackViewProps> = ({
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: KHO LƯU TRỮ BÁO CÁO THÁNG THEO LỚP                */}
+      {/* ========================================================= */}
+      {showArchiveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 my-8 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700">
+                  <Archive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">
+                    Kho Lưu Trữ Báo Cáo Tháng Đã Chỉnh Sửa
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Xem và tra cứu các bản báo cáo theo tháng đã lưu của lớp {currentClass?.name || 'này'}.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowArchiveModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter */}
+            <div className="py-3 flex items-center justify-between border-b border-slate-100 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-600">Lọc theo Tháng:</span>
+                <select
+                  value={archiveFilterMonth}
+                  onChange={(e) =>
+                    setArchiveFilterMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))
+                  }
+                  className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 font-semibold"
+                >
+                  <option value="all">Tất cả các tháng</option>
+                  {[9, 10, 11, 12, 1, 2, 3, 4, 5].map((m) => (
+                    <option key={m} value={m}>
+                      Tháng {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="text-slate-500">
+                Lớp hiện tại: <strong className="text-slate-800">{currentClass?.name || 'Tất cả'}</strong>
+              </div>
+            </div>
+
+            {/* Archives List */}
+            <div className="overflow-y-auto flex-1 py-3 space-y-3">
+              {(() => {
+                const list = (db.monthlyReportArchives || []).filter((a) => {
+                  const matchM =
+                    archiveFilterMonth === 'all' || Number(a.month) === Number(archiveFilterMonth);
+                  const matchCls =
+                    !currentClass?.id ||
+                    a.classId === currentClass.id ||
+                    a.className === currentClass.name ||
+                    (a.records || []).some((r) => r.homeClassName === currentClass.name);
+                  return matchM && matchCls;
+                });
+
+                if (list.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-slate-400">
+                      <Archive className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                      <p className="font-semibold text-sm">Chưa có bản lưu trữ báo cáo tháng nào cho lớp này.</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Dữ liệu báo cáo khi lưu sẽ tự động được sao lưu bảo vệ tại đây.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return list.map((arch) => (
+                  <div
+                    key={arch.id}
+                    className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-slate-50 transition space-y-3 text-xs"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 text-sm">{arch.title}</span>
+                          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full font-bold text-[10px]">
+                            Tháng {arch.month}
+                          </span>
+                          {arch.subject && (
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full font-bold text-[10px]">
+                              {arch.subject}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-slate-500 text-[11px] mt-0.5">
+                          GV thực hiện: <strong>{arch.editedBy}</strong> • Lưu lúc: {new Date(arch.editedAt).toLocaleString('vi-VN')}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (window.confirm('Bạn có chắc muốn xóa bản lưu trữ này?')) {
+                              storage.deleteMonthlyReportArchive(arch.id);
+                            }
+                          }}
+                          className="px-2.5 py-1 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg font-semibold flex items-center gap-1 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Xóa</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Badges */}
+                    <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200/60">
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-semibold text-[11px]">
+                        T: {arch.stats?.countT ?? 0} em ({arch.stats?.pctT ?? '0%'})
+                      </span>
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-semibold text-[11px]">
+                        H: {arch.stats?.countH ?? 0} em ({arch.stats?.pctH ?? '0%'})
+                      </span>
+                      <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded-md font-semibold text-[11px]">
+                        C (Chưa đạt chuẩn): {arch.stats?.countC ?? 0} em ({arch.stats?.pctC ?? '0%'})
+                      </span>
+                      <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md font-semibold text-[11px]">
+                        Sĩ số: {arch.studentCount} em
+                      </span>
+                    </div>
+
+                    {/* Records sample */}
+                    {arch.records && arch.records.length > 0 && (
+                      <div className="mt-2 bg-white rounded-lg border border-slate-200 overflow-hidden">
+                        <div className="max-h-36 overflow-y-auto divide-y divide-slate-100">
+                          {arch.records.slice(0, 4).map((r, ri) => (
+                            <div key={ri} className="p-2 flex items-center justify-between text-[11px]">
+                              <div className="font-semibold text-slate-800">
+                                {ri + 1}. {r.studentName} ({r.studentCode})
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                                    r.level === 'T'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : r.level === 'C'
+                                      ? 'bg-rose-100 text-rose-800'
+                                      : 'bg-blue-100 text-blue-800'
+                                  }`}
+                                >
+                                  {r.level === 'C' ? 'C (Chưa đạt chuẩn)' : r.level}
+                                </span>
+                                <span className="text-slate-600 truncate max-w-[280px]">
+                                  "{r.note}"
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ));
+              })()}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setShowArchiveModal(false)}
+                className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-slate-900 transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

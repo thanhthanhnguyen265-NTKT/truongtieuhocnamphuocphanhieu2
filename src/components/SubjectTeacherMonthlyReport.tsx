@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Printer,
   FileSpreadsheet,
@@ -22,9 +22,14 @@ import {
   Check,
   Edit3,
   X,
+  Archive,
+  History,
+  RotateCcw,
+  Trash2,
+  Eye,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { SubjectClass, Student, AppDatabase, MonthlyAssessmentTT27 } from '../types';
+import { SubjectClass, Student, AppDatabase, MonthlyAssessmentTT27, MonthlyReportEditArchive } from '../types';
 import { storage, getMonthFromDate } from '../services/storage';
 import { generateOfficialReportHtml, openPrintReportWindow } from '../services/pdfExport';
 import { ChibiAvatar } from '../data/chibiAvatars';
@@ -50,14 +55,152 @@ export const SCHOOL_MONTHS = [
   { value: 5, label: 'Tháng 5 (Tổng kết HK2)' },
 ];
 
+export interface TargetCommentGroup {
+  id: string;
+  label: string;
+  badge: string;
+  badgeColor: string;
+  description: string;
+  comments: string[];
+}
+
+export const ENGLISH_TARGETED_COMMENTS: TargetCommentGroup[] = [
+  {
+    id: 'level_T',
+    label: 'Mức T (Hoàn thành tốt / Năng khiếu)',
+    badge: '🌟 Mức T',
+    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    description: 'Dành cho học sinh tiếp thu nhanh, vốn từ phong phú, phát âm chuẩn, tự tin giao tiếp',
+    comments: [
+      'Tiếp thu bài nhanh, phát âm chuẩn xác, tự tin giao tiếp Tiếng Anh trước lớp.',
+      'Vốn từ vựng phong phú, nắm chắc mẫu câu và phản xạ giao tiếp nhanh nhạy.',
+      'Kỹ năng nghe và nói rất tốt, tích cực tương tác bằng Tiếng Anh cùng thầy cô và bạn bè.',
+      'Đọc trôi chảy, viết đúng ngữ pháp, hoàn thành xuất sắc các bài tập trên lớp.',
+      'Có năng khiếu nổi trội môn Tiếng Anh, phát âm chuẩn ngữ điệu, nhiệt tình giúp đỡ bạn.',
+      'Hăng hái phát biểu xây dựng bài, đạt nhiều điểm thi đua cao trong tháng.',
+      'Ghi nhớ từ vựng tốt, phản xạ nhanh trong các trò chơi ngôn ngữ và hoạt động cặp nhóm.',
+      'Kỹ năng phát âm và trọng âm tốt, giọng đọc truyền cảm, tự tin thuyết trình chủ đề đơn giản.',
+      'Hiểu bài sâu, biết mở rộng vốn từ và sáng tạo khi thực hành hội thoại theo cặp.',
+      'Phát âm to, rõ, ngữ điệu tự nhiên, phản xạ hỏi - đáp mẫu câu Tiếng Anh rất linh hoạt.',
+      'Hoàn thành các phiếu bài tập rèn luyện nhanh chóng, chữ viết Tiếng Anh sạch đẹp, cẩn thận.',
+      'Thể hiện sự say mê và yêu thích môn Tiếng Anh, luôn là nhân tố tích cực trong các tiết học.',
+    ],
+  },
+  {
+    id: 'level_H',
+    label: 'Mức H (Hoàn thành / Đạt chuẩn)',
+    badge: '📘 Mức H',
+    badgeColor: 'bg-blue-100 text-blue-800 border-blue-300',
+    description: 'Dành cho học sinh nắm được kiến thức cơ bản, hoàn thành bài tập, cần rèn thêm tự tin',
+    comments: [
+      'Nắm được từ vựng và mẫu câu cơ bản, hoàn thành tốt nhiệm vụ học tập trên lớp.',
+      'Có ý thức học tập tốt, hiểu bài và thực hiện đầy đủ các bài tập nghe - nói cơ bản.',
+      'Hiểu và trả lời được các câu hỏi quen thuộc, cần tự tin hơn khi nói trước tập thể.',
+      'Đọc đúng từ vựng theo hướng dẫn của giáo viên, cần luyện thêm phản xạ nghe hiểu.',
+      'Chăm chỉ hoàn thành bài tập, cần rèn luyện thêm kỹ năng phát âm và trọng âm từ.',
+      'Biết vận dụng mẫu câu vào giao tiếp đơn giản, cần tích cực giơ tay phát biểu hơn.',
+      'Thuộc từ mới theo chủ đề, cần chú ý rèn thêm kỹ năng viết chính tả từ vựng.',
+      'Có cố gắng trong học tập, hoàn thành yêu cầu bài học, cần tự tin tham gia hoạt động nhóm.',
+      'Tiếp thu bài đạt yêu cầu, cần chú ý lắng nghe băng mẫu để phát âm chuẩn hơn.',
+      'Đã thuộc các từ vựng trọng tâm trong bài, cần luyện đọc nối âm và ngữ điệu câu hỏi.',
+      'Hợp tác tốt cùng bạn trong giờ học, cần mạnh dạn xung phong đóng vai đối thoại.',
+      'Chú ý theo dõi bài học, làm bài tập đầy đủ, cần ôn luyện từ vựng thường xuyên ở nhà.',
+    ],
+  },
+  {
+    id: 'level_C',
+    label: 'Mức C (Chưa đạt chuẩn / Nhắc nhở)',
+    badge: '⚠️ Mức C (Chưa đạt chuẩn)',
+    badgeColor: 'bg-rose-100 text-rose-800 border-rose-300',
+    description: 'Dành cho học sinh chưa đạt chuẩn kiến thức kỹ năng, vốn từ hạn chế, cần kèm cặp hỗ trợ',
+    comments: [
+      'Chưa đạt chuẩn kỹ năng nghe - nói cơ bản, cần tập trung ôn luyện từ vựng và mẫu câu hàng ngày.',
+      'Phát âm còn ngập ngừng, chưa đạt chuẩn ngữ điệu, cần chú ý lắng nghe và nhắc lại theo phát âm mẫu của giáo viên.',
+      'Vốn từ vựng còn hạn chế, chưa nhớ mặt chữ, cần dành thời gian luyện viết và ghi nhớ từ mới ở nhà.',
+      'Còn nhút nhát khi giao tiếp, chưa đạt chuẩn phản xạ đối đáp, cần mạnh dạn tham gia luyện nói cùng bạn.',
+      'Kỹ năng nghe hiểu còn chậm, chưa nắm chắc các mẫu câu giao tiếp đơn giản trong chương trình.',
+      'Cần chuẩn bị bài chu đáo hơn trước khi đến lớp, mang đầy đủ sách bài tập và đồ dùng học tập môn Tiếng Anh.',
+      'Cần tích cực phát biểu và rèn luyện thêm kỹ năng đọc - viết các từ đơn giản để đạt chuẩn.',
+      'Gia đình cần phối hợp nhắc nhở em nghe lại các bài hội thoại mẫu và ôn từ vựng theo sách giáo khoa.',
+      'Còn mất tập trung trong giờ học, cần chú ý nghe giảng để nắm chắc mẫu câu cơ bản.',
+      'Còn lúng túng khi làm bài tập độc lập, cần giáo viên hỗ trợ kèm cặp thêm trong các tiết ôn tập.',
+      'Chưa thuộc từ vựng bài học, cần tích cực rèn luyện kỹ năng nhớ từ và ghép câu đơn giản.',
+      'Cần chủ động trao đổi với thầy cô khi chưa hiểu bài để nâng cao kết quả học tập môn Tiếng Anh.',
+    ],
+  },
+  {
+    id: 'skills_listen_speak',
+    label: 'Kỹ năng Nghe - Nói & Phát âm (Phonics)',
+    badge: '🗣️ Nghe - Nói',
+    badgeColor: 'bg-purple-100 text-purple-800 border-purple-300',
+    description: 'Đánh giá chuyên sâu về ngữ điệu, phản xạ, đóng vai và giao tiếp',
+    comments: [
+      'Nghe - hiểu tốt các đoạn hội thoại mẫu, phản xạ đối đáp nhanh và tự nhiên.',
+      'Phát âm rõ ràng, có ngữ điệu tự nhiên, rất tự tin khi thực hành đóng vai (role-play).',
+      'Nghe bắt từ khóa (keywords) tốt, cần luyện thêm ngữ điệu và nối âm khi nói.',
+      'Cần luyện nghe nhiều hơn qua bài hát và đoạn hội thoại ngắn để cải thiện khả năng nghe - hiểu.',
+      'Có khả năng bắt chước ngữ điệu rất tốt, hào hứng tham gia các bài vè và bài hát Tiếng Anh.',
+      'Phát âm to, rõ ràng, chú ý tốt các âm cuối (ending sounds: /s/, /t/, /d/).',
+      'Cần chú ý nghe kỹ trọng âm của từ và phát âm đúng các nguyên âm đôi.',
+      'Phản xạ nghe câu lệnh Tiếng Anh của giáo viên nhanh, thực hiện động tác chuẩn xác.',
+      'Tự tin thể hiện bài hát và vè Tiếng Anh trước lớp, phát âm chuẩn xác từng câu từ.',
+    ],
+  },
+  {
+    id: 'skills_read_write',
+    label: 'Kỹ năng Đọc - Viết & Từ vựng',
+    badge: '✍️ Đọc - Viết',
+    badgeColor: 'bg-amber-100 text-amber-800 border-amber-300',
+    description: 'Đánh giá chuyên sâu về nhận diện mặt chữ, đọc hiểu, viết câu và chính tả từ',
+    comments: [
+      'Đọc to, rõ ràng, phát âm đúng các âm đuôi, viết câu đúng chính tả và cấu trúc.',
+      'Nhận diện mặt chữ nhanh, đọc hiểu tốt các đoạn văn ngắn theo chủ đề bài học.',
+      'Viết chữ cẩn thận, đúng mẫu câu và cấu trúc, ghi chép bài học đầy đủ sạch đẹp.',
+      'Cần rèn thêm kỹ năng nhận diện từ và viết đúng thứ tự các chữ cái trong từ mới.',
+      'Đọc hiểu cơ bản tốt, cần chú ý dấu câu và viết hoa đầu câu khi làm bài viết.',
+      'Thuộc nghĩa và viết đúng chính tả các từ vựng trọng tâm trong chương trình.',
+      'Đọc diễn cảm, hiểu nhanh câu hỏi đọc hiểu và đưa ra câu trả lời chính xác.',
+      'Hoàn thành xuất sắc các bài tập nối từ, điền từ vào chỗ trống và sắp xếp lại câu.',
+      'Chữ viết Tiếng Anh ngay ngắn, trình bày vở cẩn thận, đúng quy định.',
+    ],
+  },
+  {
+    id: 'progress_competition',
+    label: 'Khen thưởng thi đua & Tiến bộ vượt bậc',
+    badge: '🏆 Thi đua',
+    badgeColor: 'bg-teal-100 text-teal-800 border-teal-300',
+    description: 'Dành cho học sinh có điểm thi đua cao, nỗ lực vươn lên, đóng góp cho tập thể',
+    comments: [
+      'Có nhiều tiến bộ vượt bậc trong tháng, phát biểu bài hăng hái và tự tin hơn rõ rệt.',
+      'Tích cực hoạt động nhóm, là nhóm trưởng gương mẫu, dẫn dắt các bạn học tập tốt.',
+      'Đạt thành tích thi đua xuất sắc trong tháng, chuẩn bị đồ dùng và bài vở môn Tiếng Anh rất chu đáo.',
+      'Đã có nhiều cố gắng khắc phục tính nhút nhát, có tiến bộ rõ nét trong kỹ năng phát âm và đọc bài.',
+      'Đạt nhiều bông hoa điểm tốt môn Tiếng Anh, thái độ học tập nghiêm túc và gương mẫu.',
+      'Hăng say tham gia các trò chơi học tập môn Tiếng Anh, tạo không khí học tập sôi nổi cho lớp.',
+      'Có tinh thần đồng đội cao, nhiệt tình hướng dẫn bạn cùng bàn luyện nói Tiếng Anh.',
+      'Đã có ý thức giơ tay phát biểu bài nhiều hơn, có sự tiến bộ đáng khen trong kỹ năng viết từ mới.',
+    ],
+  },
+  {
+    id: 'attitude_discipline',
+    label: 'Nề nếp & Thái độ học tập',
+    badge: '⭐ Nề nếp',
+    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+    description: 'Đánh giá tinh thần học tập, chuẩn bị bài, nề nếp kỷ luật trong giờ học Tiếng Anh',
+    comments: [
+      'Đi học đúng giờ, mang đầy đủ sách bài tập và đồ dùng học tập môn Tiếng Anh.',
+      'Thái độ học tập nghiêm túc, chú ý lắng nghe thầy cô giảng bài và ghi chép cẩn thận.',
+      'Ý thức tự giác học tập tốt, luôn hoàn thành bài tập về nhà trước khi đến lớp.',
+      'Cần chú ý trật tự trong giờ học, tránh làm việc riêng để không bỏ lỡ kiến thức bài giảng.',
+      'Cần chuẩn bị bài chu đáo trước khi đến lớp, tích cực tương tác cùng giáo viên.',
+      'Thực hiện nghiêm túc nội quy phòng học bộ môn, giữ gìn tài liệu và trang thiết bị học tập.',
+    ],
+  },
+];
+
 export const QUICK_COMMENTS_BY_SUBJECT: Record<string, string[]> = {
   'Tiếng Anh': [
-    'Phát âm chuẩn xác, tự tin giao tiếp và nhớ từ vựng tốt.',
-    'Nắm chắc từ vựng và mẫu câu cơ bản, chăm chỉ học tập.',
-    'Có khả năng nghe - hiểu tốt, tích cực tham gia tương tác.',
-    'Cần rèn luyện thêm kỹ năng phát âm và phản xạ nói.',
-    'Cần tập trung ôn luyện từ vựng và tự tin hơn khi trả lời.',
-    'Hoàn thành tốt các bài tập nghe và đọc hiểu trên lớp.',
+    ...ENGLISH_TARGETED_COMMENTS.flatMap((g) => g.comments),
   ],
   'Tin học': [
     'Thao tác máy tính nhanh nhẹn, hoàn thành tốt bài thực hành.',
@@ -121,57 +264,17 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
   const [sortField, setSortField] = useState<'name' | 'points' | 'level'>('name');
   const [sortAsc, setSortAsc] = useState(true);
 
+  // Archive Modal states (Mục lưu trữ chỉnh sửa báo cáo theo tháng, theo từng lớp)
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveFilterMonth, setArchiveFilterMonth] = useState<number | 'all'>('all');
+  const [selectedArchiveDetail, setSelectedArchiveDetail] = useState<MonthlyReportEditArchive | null>(null);
+  const [archiveSearch, setArchiveSearch] = useState('');
+
   // Selected student for quick comment suggestion modal/popover
   const [activeSuggestionStudentId, setActiveSuggestionStudentId] = useState<string | null>(null);
+  const [suggestionCategory, setSuggestionCategory] = useState<string>('all');
+  const [suggestionSearch, setSuggestionSearch] = useState<string>('');
   const [selectedStudentTxDetail, setSelectedStudentTxDetail] = useState<Student | null>(null);
-
-  // State of monthly comments and levels
-  // Key format: studentId -> { level: 'T' | 'H' | 'C', note: string }
-  const [monthlyData, setMonthlyData] = useState<
-    Record<string, { level: 'T' | 'H' | 'C'; note: string }>
-  >(() => {
-    const initial: Record<string, { level: 'T' | 'H' | 'C'; note: string }> = {};
-    students.forEach((stu) => {
-      // 1. Try finding in subjectClass.evaluations for this month
-      const clsEval = (subjectClass.evaluations || []).find(
-        (e) => e.studentId === stu.id && e.month === initialMonth
-      );
-      if (clsEval) {
-        initial[stu.id] = { level: clsEval.level || 'T', note: clsEval.note || '' };
-        return;
-      }
-
-      // 2. Try finding in db.monthlyAssessments
-      const monthlyAssessment = (db.monthlyAssessments || []).find(
-        (m) =>
-          m.studentId === stu.id &&
-          m.month === initialMonth &&
-          (m.schoolYearId === db.currentSchoolYearId || m.schoolYearId === 'SY2026_2027')
-      );
-      const subjRecord = monthlyAssessment?.subjects?.[subjectClass.subject];
-      if (subjRecord) {
-        initial[stu.id] = { level: subjRecord.level || 'T', note: subjRecord.note || '' };
-        return;
-      }
-
-      // 3. Fallback: Check HK1 or HK2 from class evaluations
-      const semKey = [9, 10, 11, 12].includes(initialMonth) ? 'HK1' : 'HK2';
-      const semEval = (subjectClass.evaluations || []).find(
-        (e) => e.studentId === stu.id && e.semester === semKey
-      );
-      if (semEval) {
-        initial[stu.id] = { level: semEval.level || 'T', note: semEval.note || '' };
-        return;
-      }
-
-      // Default
-      initial[stu.id] = {
-        level: 'T',
-        note: `Em chăm chỉ, tiếp thu bài tốt môn ${subjectClass.subject}.`,
-      };
-    });
-    return initial;
-  });
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const triggerToast = (msg: string) => {
@@ -179,42 +282,138 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // When selectedMonth changes, reload or preserve comments
-  const handleMonthChange = (newMonth: number) => {
-    setSelectedMonth(newMonth);
+  /**
+   * Tải nhận xét và mức đánh giá theo tháng an toàn từ 3 nguồn:
+   * 1. subjectClass.evaluations (đánh giá lớp bộ môn)
+   * 2. db.monthlyAssessments (Thông tư 27)
+   * 3. db.monthlyReportArchives (Kho lưu trữ các bản đã lưu trước đó)
+   */
+  const getInitialMonthlyDataForMonth = (monthToLoad: number) => {
     const updated: Record<string, { level: 'T' | 'H' | 'C'; note: string }> = {};
 
+    // Tìm lớp bộ môn mới nhất trong cơ sở dữ liệu
+    const currentClassInDb =
+      (db.subjectClasses || []).find((c) => c.id === subjectClass.id) || subjectClass;
+
+    // Tìm bản lưu trữ gần nhất cho lớp và tháng này
+    const latestArchive = (db.monthlyReportArchives || []).find(
+      (a) =>
+        (a.classId === subjectClass.id || a.className === subjectClass.name) &&
+        Number(a.month) === Number(monthToLoad)
+    );
+
     students.forEach((stu) => {
-      // Check subjectClass.evaluations
-      const clsEval = (subjectClass.evaluations || []).find(
-        (e) => e.studentId === stu.id && e.month === newMonth
+      // 1. Kiểm tra trong subjectClass.evaluations
+      const clsEval = (currentClassInDb.evaluations || subjectClass.evaluations || []).find(
+        (e) => e.studentId === stu.id && Number(e.month) === Number(monthToLoad)
       );
-      if (clsEval) {
+      if (clsEval && (clsEval.note || clsEval.level)) {
         updated[stu.id] = { level: clsEval.level || 'T', note: clsEval.note || '' };
         return;
       }
 
-      // Check db.monthlyAssessments
+      // 2. Kiểm tra trong db.monthlyAssessments
       const monthlyAssessment = (db.monthlyAssessments || []).find(
         (m) =>
           m.studentId === stu.id &&
-          m.month === newMonth &&
-          (m.schoolYearId === db.currentSchoolYearId || m.schoolYearId === 'SY2026_2027')
+          Number(m.month) === Number(monthToLoad) &&
+          (!m.schoolYearId || !db.currentSchoolYearId || m.schoolYearId === db.currentSchoolYearId || m.schoolYearId === 'SY2026_2027')
       );
       const subjRecord = monthlyAssessment?.subjects?.[subjectClass.subject];
-      if (subjRecord) {
+      if (subjRecord && (subjRecord.note || subjRecord.level)) {
         updated[stu.id] = { level: subjRecord.level || 'T', note: subjRecord.note || '' };
         return;
       }
 
-      // Default to existing or standard
-      updated[stu.id] = monthlyData[stu.id] || {
+      // 3. Kiểm tra trong kho lưu trữ bản chỉnh sửa
+      if (latestArchive && latestArchive.records) {
+        const archRow = latestArchive.records.find((r) => r.studentId === stu.id);
+        if (archRow && (archRow.note || archRow.level)) {
+          updated[stu.id] = { level: archRow.level || 'T', note: archRow.note || '' };
+          return;
+        }
+      }
+
+      // 4. Dự phòng: Kiểm tra đánh giá học kỳ
+      const semKey = [9, 10, 11, 12].includes(monthToLoad) ? 'HK1' : 'HK2';
+      const semEval = (currentClassInDb.evaluations || subjectClass.evaluations || []).find(
+        (e) => e.studentId === stu.id && e.semester === semKey
+      );
+      if (semEval && (semEval.note || semEval.level)) {
+        updated[stu.id] = { level: semEval.level || 'T', note: semEval.note || '' };
+        return;
+      }
+
+      // 5. Giá trị mặc định
+      updated[stu.id] = {
         level: 'T',
-        note: `Em tiếp thu tốt bài học môn ${subjectClass.subject}.`,
+        note:
+          subjectClass.subject === 'Tiếng Anh'
+            ? 'Tiếp thu bài nhanh, phát âm chuẩn xác, tự tin giao tiếp Tiếng Anh trước lớp.'
+            : `Em chăm chỉ, tiếp thu bài tốt môn ${subjectClass.subject}.`,
       };
     });
 
+    return updated;
+  };
+
+  // State of monthly comments and levels
+  const [monthlyData, setMonthlyData] = useState<
+    Record<string, { level: 'T' | 'H' | 'C'; note: string }>
+  >(() => getInitialMonthlyDataForMonth(initialMonth));
+
+  // Tự động đồng bộ và nạp lại khi chuyển tháng hoặc đổi lớp
+  useEffect(() => {
+    const fresh = getInitialMonthlyDataForMonth(selectedMonth);
+    setMonthlyData(fresh);
+  }, [selectedMonth, subjectClass.id, students.length]);
+
+  // When selectedMonth changes, reload comments
+  const handleMonthChange = (newMonth: number) => {
+    setSelectedMonth(newMonth);
+    const updated = getInitialMonthlyDataForMonth(newMonth);
     setMonthlyData(updated);
+  };
+
+  // Danh sách các bản lưu trữ báo cáo của lớp này
+  const classArchives = useMemo(() => {
+    return (db.monthlyReportArchives || []).filter(
+      (a) =>
+        (a.classId === subjectClass.id || a.className === subjectClass.name) &&
+        (archiveFilterMonth === 'all' || Number(a.month) === Number(archiveFilterMonth))
+    );
+  }, [db.monthlyReportArchives, subjectClass.id, subjectClass.name, archiveFilterMonth]);
+
+  // Khôi phục một bản báo cáo từ kho lưu trữ vào bảng làm việc
+  const handleRestoreArchive = (archive: MonthlyReportEditArchive) => {
+    if (
+      !window.confirm(
+        `Bạn có chắc muốn nạp lại bản lưu trữ Tháng ${archive.month} (lưu ngày ${new Date(archive.editedAt).toLocaleString('vi-VN')}) vào bảng làm việc hiện tại?`
+      )
+    ) {
+      return;
+    }
+    setSelectedMonth(Number(archive.month));
+    const restoredData: Record<string, { level: 'T' | 'H' | 'C'; note: string }> = {};
+    archive.records.forEach((r) => {
+      restoredData[r.studentId] = {
+        level: r.level || 'T',
+        note: r.note || '',
+      };
+    });
+    setMonthlyData(restoredData);
+    setShowArchiveModal(false);
+    triggerToast(
+      `Đã khôi phục thành công dữ liệu báo cáo Tháng ${archive.month} lớp ${archive.className} từ kho lưu trữ!`
+    );
+  };
+
+  // Xóa bản lưu trữ
+  const handleDeleteArchive = (archiveId: string) => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa bản lưu trữ báo cáo tháng này?')) return;
+    storage.deleteMonthlyReportArchive(archiveId);
+    if (selectedArchiveDetail?.id === archiveId) setSelectedArchiveDetail(null);
+    triggerToast('Đã xóa bản lưu trữ thành công!');
   };
 
   // Helper to calculate student monthly competition points
@@ -390,11 +589,12 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
   const handleSaveMonthlyAssessments = () => {
     const sem = [9, 10, 11, 12].includes(selectedMonth) ? 'HK1' : 'HK2';
     const nowIso = new Date().toISOString();
+    const targetMonth = Number(selectedMonth);
 
     // 1. Update subjectClass.evaluations
     const existingEvals = subjectClass.evaluations || [];
     const otherEvals = existingEvals.filter(
-      (e) => !(e.month === selectedMonth && students.some((s) => s.id === e.studentId))
+      (e) => !(Number(e.month) === targetMonth && students.some((s) => s.id === e.studentId))
     );
 
     const newClassEvals = students.map((stu) => {
@@ -402,7 +602,7 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
       return {
         studentId: stu.id,
         semester: sem,
-        month: selectedMonth,
+        month: targetMonth,
         level: data.level,
         note: data.note,
         updatedAt: nowIso,
@@ -423,14 +623,15 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
       const matchIdx = updatedMonthlyAssessments.findIndex(
         (m) =>
           m.studentId === stu.id &&
-          m.month === selectedMonth &&
-          (m.schoolYearId === db.currentSchoolYearId || m.schoolYearId === 'SY2026_2027')
+          Number(m.month) === targetMonth &&
+          (!m.schoolYearId || !db.currentSchoolYearId || m.schoolYearId === db.currentSchoolYearId || m.schoolYearId === 'SY2026_2027')
       );
 
       if (matchIdx >= 0) {
         const rec = updatedMonthlyAssessments[matchIdx];
         updatedMonthlyAssessments[matchIdx] = {
           ...rec,
+          month: targetMonth,
           subjects: {
             ...rec.subjects,
             [subjectClass.subject]: {
@@ -438,16 +639,17 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
               note: data.note,
             },
           },
+          updatedAt: nowIso,
         };
       } else {
         const homeClass = db.classes.find((c) => c.id === stu.currentClassId);
         const newRecord: MonthlyAssessmentTT27 = {
-          id: `MA_${stu.id}_${selectedMonth}_${Date.now()}`,
+          id: `MA_${stu.id}_M${targetMonth}_${Date.now()}`,
           studentId: stu.id,
           studentName: stu.fullName,
           classId: homeClass?.id || subjectClass.id,
           schoolYearId: db.currentSchoolYearId || 'SY2026_2027',
-          month: selectedMonth,
+          month: targetMonth,
           subjects: {
             [subjectClass.subject]: {
               level: data.level,
@@ -477,34 +679,83 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
       }
     });
 
-    // 3. Save to database
+    // 3. Tự động lưu trữ một bản snapshot vào Kho lưu trữ báo cáo tháng
+    const archiveRecords = students.map((stu) => {
+      const data = monthlyData[stu.id] || { level: 'T', note: '' };
+      const comp = getStudentMonthlyCompetition(stu.id, targetMonth);
+      const homeClass = db.classes.find((c) => c.id === stu.currentClassId);
+      return {
+        studentId: stu.id,
+        studentCode: stu.studentCode,
+        studentName: stu.fullName,
+        gender: stu.gender,
+        homeClassName: homeClass?.name || stu.currentClassId,
+        level: data.level,
+        note: data.note,
+        competitionPoints: comp.total,
+        competitionRank: data.level === 'C' ? 'Chưa đạt chuẩn' : comp.rankBadge,
+        posPoints: comp.pos,
+        negPoints: comp.neg,
+      };
+    });
+
+    const newArchiveEntry: MonthlyReportEditArchive = {
+      id: `ARCHIVE_${subjectClass.id}_M${targetMonth}_${Date.now()}`,
+      title: `Báo cáo Tháng ${targetMonth} - ${subjectClass.name} (${subjectClass.subject})`,
+      classId: subjectClass.id,
+      className: subjectClass.name,
+      subject: subjectClass.subject,
+      month: targetMonth,
+      schoolYearId: db.currentSchoolYearId || 'SY2026_2027',
+      editedAt: nowIso,
+      editedBy: customTeacherName,
+      studentCount: students.length,
+      stats: {
+        countT: stats.countT,
+        countH: stats.countH,
+        countC: stats.countC,
+        pctT: stats.pctT,
+        pctH: stats.pctH,
+        pctC: stats.pctC,
+      },
+      records: archiveRecords,
+      summaryNote: `Tổng điểm thi đua: +${stats.totalPosPoints}/-${stats.totalNegPoints}. Mức C (Chưa đạt chuẩn): ${stats.countC} em.`,
+    };
+
+    const updatedMonthlyReportArchives = [
+      newArchiveEntry,
+      ...(db.monthlyReportArchives || []).filter((a) => a.id !== newArchiveEntry.id),
+    ];
+
+    // 4. Save to database
     const updatedDb: AppDatabase = {
       ...db,
       subjectClasses: (db.subjectClasses || []).map((c) =>
         c.id === subjectClass.id ? updatedSubjectClass : c
       ),
       monthlyAssessments: updatedMonthlyAssessments,
+      monthlyReportArchives: updatedMonthlyReportArchives,
     };
 
     storage.save(updatedDb, true, {
       category: 'Báo cáo tháng bộ môn',
-      action: 'Lưu nhận xét tháng của Giáo viên bộ môn',
-      details: `Đã lưu đánh giá & nhận xét Tháng ${selectedMonth} môn ${subjectClass.subject} (${subjectClass.name}) cho ${students.length} học sinh.`,
+      action: 'Lưu nhận xét tháng & Lưu trữ bản sửa',
+      details: `Đã lưu đánh giá & lưu trữ bản báo cáo Tháng ${targetMonth} môn ${subjectClass.subject} (${subjectClass.name}) cho ${students.length} học sinh.`,
     });
 
     triggerToast(
-      `Đã lưu & đồng bộ thành công nhận xét Tháng ${selectedMonth} môn ${subjectClass.subject} cho ${students.length} học sinh!`
+      `Đã lưu & đồng bộ thành công vào kho lưu trữ nhận xét Tháng ${targetMonth} môn ${subjectClass.subject} cho ${students.length} học sinh!`
     );
     if (onRefresh) onRefresh();
   };
 
   // Batch assign comments
-  const handleBatchApplyComment = (levelTarget: 'T' | 'H', commentTemplate: string) => {
+  const handleBatchApplyComment = (levelTarget: 'T' | 'H' | 'C', commentTemplate: string) => {
     setMonthlyData((prev) => {
       const updated = { ...prev };
       students.forEach((stu) => {
         const cur = updated[stu.id] || { level: 'T', note: '' };
-        if (cur.level === levelTarget && (!cur.note || cur.note.trim().length === 0)) {
+        if (cur.level === levelTarget) {
           updated[stu.id] = {
             ...cur,
             note: commentTemplate,
@@ -513,7 +764,178 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
       });
       return updated;
     });
-    triggerToast(`Đã áp dụng nhận xét mẫu cho học sinh đạt mức "${levelTarget}"!`);
+    triggerToast(`Đã áp dụng nhận xét mẫu cho toàn bộ học sinh mức "${levelTarget}"!`);
+  };
+
+  // Grouped suggestions based on subject
+  const availableCategoryGroups: TargetCommentGroup[] = useMemo(() => {
+    if (subjectClass.subject === 'Tiếng Anh') {
+      return ENGLISH_TARGETED_COMMENTS;
+    }
+    return [
+      {
+        id: 'level_T',
+        label: `Mức T môn ${subjectClass.subject}`,
+        badge: '🌟 Mức T',
+        badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+        description: 'Dành cho học sinh tiếp thu nhanh, hoàn thành xuất sắc nhiệm vụ',
+        comments: [
+          `Tiếp thu bài nhanh, hoàn thành xuất sắc các bài tập và nội dung thực hành môn ${subjectClass.subject}.`,
+          `Có năng khiếu nổi trội môn ${subjectClass.subject}, tích cực sáng tạo và giúp đỡ bạn bè.`,
+          `Chăm chỉ, hăng hái phát biểu xây dựng bài, đạt nhiều điểm thi đua tốt môn ${subjectClass.subject}.`,
+          `Nắm vững kiến thức trọng tâm, kỹ năng thực hành thành thạo và chuẩn xác.`,
+        ],
+      },
+      {
+        id: 'level_H',
+        label: `Mức H môn ${subjectClass.subject}`,
+        badge: '📘 Mức H',
+        badgeColor: 'bg-blue-100 text-blue-800 border-blue-300',
+        description: 'Dành cho học sinh hoàn thành bài học, đạt yêu cầu chuẩn kiến thức kỹ năng',
+        comments: [
+          `Nắm được kiến thức cơ bản, hoàn thành tốt nhiệm vụ học tập môn ${subjectClass.subject}.`,
+          `Có ý thức học tập nghiêm túc, chuẩn bị đầy đủ đồ dùng học tập trước giờ học.`,
+          `Thực hành đạt yêu cầu, cần tích cực phát biểu và tự tin hơn trước lớp.`,
+          `Chăm chỉ, hợp tác tốt với bạn bè trong các hoạt động nhóm môn ${subjectClass.subject}.`,
+        ],
+      },
+      {
+        id: 'level_C',
+        label: `Mức C môn ${subjectClass.subject}`,
+        badge: '🛠️ Mức C',
+        badgeColor: 'bg-rose-100 text-rose-800 border-rose-300',
+        description: 'Dành cho học sinh còn chậm, cần rèn luyện thêm',
+        comments: [
+          `Cần tập trung chú ý nghe giảng và rèn luyện thêm các kỹ năng cơ bản môn ${subjectClass.subject}.`,
+          `Thao tác thực hành còn lúng túng, cần chú ý quan sát và làm theo hướng dẫn của giáo viên.`,
+          `Cần chuẩn bị đầy đủ sách vở, dụng cụ học tập môn ${subjectClass.subject} khi đến lớp.`,
+          `Còn mất trật tự trong giờ học, cần nghiêm túc và tích cực rèn luyện hơn.`,
+        ],
+      },
+      {
+        id: 'progress',
+        label: 'Khen thưởng thi đua & Tiến bộ',
+        badge: '🏆 Thi đua',
+        badgeColor: 'bg-teal-100 text-teal-800 border-teal-300',
+        description: 'Dành cho học sinh có điểm thi đua cao hoặc tiến bộ rõ rệt',
+        comments: [
+          `Có nhiều tiến bộ trong tháng, hăng hái tham gia các hoạt động môn ${subjectClass.subject}.`,
+          `Đạt thành tích thi đua tốt, có ý thức kỷ luật gương mẫu trong giờ học.`,
+          `Nhiệt tình tham gia các phong trào và hoạt động chuyên môn của lớp.`,
+        ],
+      },
+    ];
+  }, [subjectClass.subject]);
+
+  // Filtered comment suggestions for popover
+  const filteredCommentSuggestions = useMemo(() => {
+    let pool: { text: string; categoryLabel: string; badgeColor: string }[] = [];
+    if (suggestionCategory === 'all') {
+      availableCategoryGroups.forEach((cat) => {
+        cat.comments.forEach((c) => {
+          pool.push({ text: c, categoryLabel: cat.badge, badgeColor: cat.badgeColor });
+        });
+      });
+    } else {
+      const found = availableCategoryGroups.find((c) => c.id === suggestionCategory);
+      if (found) {
+        found.comments.forEach((c) => {
+          pool.push({ text: c, categoryLabel: found.badge, badgeColor: found.badgeColor });
+        });
+      }
+    }
+
+    if (suggestionSearch.trim()) {
+      const q = suggestionSearch.trim().toLowerCase();
+      pool = pool.filter((item) => item.text.toLowerCase().includes(q));
+    }
+
+    return pool;
+  }, [availableCategoryGroups, suggestionCategory, suggestionSearch]);
+
+  // Open suggestion popover and auto preselect matching category
+  const openSuggestionForStudent = (stuId: string) => {
+    if (activeSuggestionStudentId === stuId) {
+      setActiveSuggestionStudentId(null);
+    } else {
+      setActiveSuggestionStudentId(stuId);
+      setSuggestionSearch('');
+      const curLvl = monthlyData[stuId]?.level || 'T';
+      if (curLvl === 'T') setSuggestionCategory('level_T');
+      else if (curLvl === 'H') setSuggestionCategory('level_H');
+      else if (curLvl === 'C') setSuggestionCategory('level_C');
+      else setSuggestionCategory('all');
+    }
+  };
+
+  // Smart suggestion generator for 1 single student
+  const getSmartCommentForStudent = (stuId: string): string => {
+    const cur = monthlyData[stuId] || { level: 'T', note: '' };
+    const comp = getStudentMonthlyCompetition(stuId, selectedMonth);
+
+    if (subjectClass.subject === 'Tiếng Anh') {
+      if (comp.total >= 5) {
+        const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'progress_competition')?.comments || [];
+        return pool[Math.floor(Math.random() * pool.length)] || 'Có nhiều tiến bộ vượt bậc trong tháng, phát biểu bài hăng hái và tự tin hơn rõ rệt.';
+      }
+      if (cur.level === 'T') {
+        const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'level_T')?.comments || [];
+        return pool[Math.floor(Math.random() * pool.length)] || 'Tiếp thu bài nhanh, phát âm chuẩn xác, tự tin giao tiếp Tiếng Anh trước lớp.';
+      }
+      if (cur.level === 'H') {
+        const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'level_H')?.comments || [];
+        return pool[Math.floor(Math.random() * pool.length)] || 'Nắm được từ vựng và mẫu câu cơ bản, hoàn thành tốt nhiệm vụ học tập trên lớp.';
+      }
+      const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'level_C')?.comments || [];
+      return pool[Math.floor(Math.random() * pool.length)] || 'Cần tập trung ôn luyện từ vựng hàng ngày và tự tin hơn khi thực hành nói Tiếng Anh.';
+    }
+
+    if (cur.level === 'T') return `Tiếp thu bài nhanh, hoàn thành xuất sắc các bài tập môn ${subjectClass.subject}.`;
+    if (cur.level === 'H') return `Nắm được kiến thức cơ bản, hoàn thành tốt nhiệm vụ học tập môn ${subjectClass.subject}.`;
+    return `Cần tập trung chú ý nghe giảng và rèn luyện thêm các kỹ năng cơ bản môn ${subjectClass.subject}.`;
+  };
+
+  // Smart auto-comment generation for the entire class with natural differentiation
+  const handleSmartAutoFillAll = () => {
+    setMonthlyData((prev) => {
+      const updated = { ...prev };
+      students.forEach((stu, idx) => {
+        const cur = updated[stu.id] || { level: 'T', note: '' };
+        const comp = getStudentMonthlyCompetition(stu.id, selectedMonth);
+
+        let chosenComment = '';
+        if (subjectClass.subject === 'Tiếng Anh') {
+          if (comp.total >= 5 && (cur.level === 'T' || cur.level === 'H')) {
+            const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'progress_competition')?.comments || [];
+            chosenComment = pool[idx % pool.length];
+          } else if (cur.level === 'T') {
+            const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'level_T')?.comments || [];
+            chosenComment = pool[idx % pool.length];
+          } else if (cur.level === 'H') {
+            const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'level_H')?.comments || [];
+            chosenComment = pool[idx % pool.length];
+          } else {
+            const pool = ENGLISH_TARGETED_COMMENTS.find((c) => c.id === 'level_C')?.comments || [];
+            chosenComment = pool[idx % pool.length];
+          }
+        } else {
+          if (cur.level === 'T') chosenComment = `Tiếp thu bài nhanh, chăm chỉ và đạt kết quả tốt môn ${subjectClass.subject}.`;
+          else if (cur.level === 'H') chosenComment = `Hoàn thành tốt các bài học và nội dung thực hành môn ${subjectClass.subject}.`;
+          else chosenComment = `Cần cố gắng rèn luyện thêm và tập trung hơn trong giờ học môn ${subjectClass.subject}.`;
+        }
+
+        updated[stu.id] = {
+          ...cur,
+          note: chosenComment,
+        };
+      });
+      return updated;
+    });
+    triggerToast(
+      subjectClass.subject === 'Tiếng Anh'
+        ? `Đã tự động tạo nhận xét Tiếng Anh phân hóa đa dạng chuẩn Thông tư 27 cho toàn bộ ${students.length} học sinh!`
+        : `Đã tự động tạo nhận xét phân hóa theo đối tượng học sinh cho cả lớp!`
+    );
   };
 
   // Quick suggestions for subject
@@ -543,16 +965,18 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
     const tableRows = studentRows.map((r) => {
       const compTotalStr =
         r.comp.total > 0 ? `+${r.comp.total}` : r.comp.total === 0 ? '0' : `${r.comp.total}`;
+      const levelDisplay = r.level === 'C' ? 'C (Chưa đạt chuẩn)' : r.level;
+      const rankDisplay = r.level === 'C' ? 'Chưa đạt chuẩn ⚠️' : r.comp.rankBadge;
       return [
         r.index,
         r.student.studentCode,
         r.student.fullName,
         r.homeClassName,
-        r.level,
+        levelDisplay,
         `+${r.comp.pos}`,
         `-${r.comp.neg}`,
         compTotalStr,
-        r.comp.rankBadge,
+        rankDisplay,
         r.note || `Em chăm chỉ, hoàn thành tốt nhiệm vụ học tập môn ${subjectClass.subject}.`,
       ];
     });
@@ -569,7 +993,7 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
         { label: 'Sĩ số học sinh', value: `${stats.totalStudents} em` },
         {
           label: 'Tỷ lệ Mức Đạt',
-          value: `T: ${stats.countT} (${stats.pctT}%) • H: ${stats.countH} (${stats.pctH}%) • C: ${stats.countC} (${stats.pctC}%)`,
+          value: `T: ${stats.countT} (${stats.pctT}%) • H: ${stats.countH} (${stats.pctH}%) • C (Chưa đạt chuẩn): ${stats.countC} (${stats.pctC}%)`,
         },
         {
           label: 'Tổng điểm thi đua môn',
@@ -586,7 +1010,7 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
       signerName: customTeacherName,
       reviewerTitle: 'TỔ TRƯỞNG CHUYÊN MÔN / BAN GIÁM HIỆU',
       reviewerName: db.settings.principalName || 'Ban Giám Hiệu',
-      notes: `Báo cáo tổng hợp được lập từ phân hệ Sổ Theo Dõi Giáo Viên Bộ Môn trường Tiểu học Nam Phước - Phân hiệu 2 Duy Phước 2. Mọi đánh giá định kỳ và điểm thi đua đã được đối chiếu Thông tư 27/2020/TT-BGDĐT.`,
+      notes: `Báo cáo tổng hợp được lập từ phân hệ Sổ Theo Dõi Giáo Viên Bộ Môn trường Tiểu học Nam Phước - Phân hiệu 2 Duy Phước 2. Mọi đánh giá định kỳ và điểm thi đua đã được đối chiếu Thông tư 27/2020/TT-BGDĐT. Mức C: Chưa đạt chuẩn.`,
     };
 
     openPrintReportWindow(reportOptions as any, db.settings, customTeacherName);
@@ -607,11 +1031,11 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
         'Lớp Chủ Nhiệm': r.homeClassName,
         'Môn Học': subjectClass.subject,
         'Tháng Báo Cáo': `Tháng ${selectedMonth}`,
-        'Mức Đánh Giá (TT27)': r.level,
+        'Mức Đánh Giá (TT27)': r.level === 'C' ? 'C (Chưa đạt chuẩn)' : r.level === 'T' ? 'T (Hoàn thành tốt)' : 'H (Hoàn thành)',
         'Điểm Cộng Thi Đua (+)': r.comp.pos,
         'Điểm Trừ Thi Đua (-)': r.comp.neg,
         'Tổng Điểm Thi Đua Tháng': r.comp.total,
-        'Xếp Loại Thi Đua': r.comp.rankBadge,
+        'Xếp Loại Thi Đua': r.level === 'C' ? 'Chưa đạt chuẩn' : r.comp.rankBadge,
         'Lời Nhận Xét Của GV Bộ Môn': r.note,
         'Chi Tiết Tiêu Chí Nhận Trong Tháng': criteriaNotes || 'Chưa có ghi nhận thêm',
       };
@@ -678,7 +1102,7 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
         <p><strong>1. Thống kê tổng hợp:</strong></p>
         <ul>
           <li>Sĩ số học sinh: ${stats.totalStudents} em.</li>
-          <li>Xếp loại Môn học: Mức T (Hoàn thành tốt): ${stats.countT} em (${stats.pctT}%), Mức H (Hoàn thành): ${stats.countH} em (${stats.pctH}%), Mức C (Chưa hoàn thành): ${stats.countC} em (${stats.pctC}%).</li>
+          <li>Xếp loại Môn học: Mức T (Hoàn thành tốt): ${stats.countT} em (${stats.pctT}%), Mức H (Hoàn thành): ${stats.countH} em (${stats.pctH}%), Mức C (Chưa đạt chuẩn): ${stats.countC} em (${stats.pctC}%).</li>
           <li>Điểm thi đua môn học trong tháng: Tổng điểm thưởng: +${stats.totalPosPoints} đ; Tổng điểm trừ: -${stats.totalNegPoints} đ; Điểm ròng: ${stats.totalNetPoints >= 0 ? '+' : ''}${stats.totalNetPoints} đ.</li>
         </ul>
 
@@ -707,11 +1131,11 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
                 <td class="center">${r.student.studentCode}</td>
                 <td><strong>${r.student.fullName}</strong></td>
                 <td class="center">${r.homeClassName}</td>
-                <td class="center"><strong>${r.level}</strong></td>
+                <td class="center">${r.level === 'C' ? '<strong style="color: #dc2626;">C (Chưa đạt chuẩn)</strong>' : `<strong>${r.level}</strong>`}</td>
                 <td class="center" style="color: green;">+${r.comp.pos}</td>
                 <td class="center" style="color: red;">-${r.comp.neg}</td>
                 <td class="center"><strong>${r.comp.total > 0 ? `+${r.comp.total}` : r.comp.total}</strong></td>
-                <td class="center">${r.comp.rankBadge}</td>
+                <td class="center">${r.level === 'C' ? '<span style="color: #dc2626; font-weight: bold;">Chưa đạt chuẩn</span>' : r.comp.rankBadge}</td>
                 <td>${r.note || `Em tiếp thu tốt bài học môn ${subjectClass.subject}.`}</td>
               </tr>
             `
@@ -1035,29 +1459,60 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
         {/* Right: Batch Assign */}
         <div className="flex flex-wrap items-center gap-2">
           <button
+            onClick={handleSmartAutoFillAll}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+            title="Tự động phân hóa nhận xét theo Mức ĐG (T, H, C) và Điểm thi đua của từng em"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <span>Tự động nhận xét thông minh (TT27)</span>
+          </button>
+
+          <button
             onClick={() =>
               handleBatchApplyComment(
                 'T',
-                `Em chăm chỉ, tích cực tham gia các hoạt động học tập môn ${subjectClass.subject}.`
+                subjectClass.subject === 'Tiếng Anh'
+                  ? 'Tiếp thu bài nhanh, phát âm chuẩn xác, tự tin giao tiếp Tiếng Anh trước lớp.'
+                  : `Em chăm chỉ, tích cực tham gia các hoạt động học tập môn ${subjectClass.subject}.`
               )
             }
-            className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            title="Gán nhận xét nhanh cho toàn bộ học sinh mức T"
           >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Gán nhận xét nhanh cho mức T</span>
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Gán Mức T</span>
           </button>
 
           <button
             onClick={() =>
               handleBatchApplyComment(
                 'H',
-                `Em hoàn thành các bài học và nội dung thực hành môn ${subjectClass.subject}.`
+                subjectClass.subject === 'Tiếng Anh'
+                  ? 'Nắm được từ vựng và mẫu câu cơ bản, hoàn thành tốt nhiệm vụ học tập trên lớp.'
+                  : `Em hoàn thành các bài học và nội dung thực hành môn ${subjectClass.subject}.`
               )
             }
-            className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            className="px-2.5 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            title="Gán nhận xét nhanh cho toàn bộ học sinh mức H"
           >
             <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-            <span>Gán nhận xét nhanh cho mức H</span>
+            <span>Gán Mức H</span>
+          </button>
+
+          <button
+            onClick={() =>
+              handleBatchApplyComment(
+                'C',
+                subjectClass.subject === 'Tiếng Anh'
+                  ? 'Cần tập trung ôn luyện từ vựng hàng ngày và tự tin hơn khi thực hành nói Tiếng Anh.'
+                  : `Cần chú ý nghe giảng và rèn luyện thêm kỹ năng môn ${subjectClass.subject}.`
+              )
+            }
+            className="px-2.5 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            title="Gán nhận xét nhanh cho toàn bộ học sinh mức C"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-rose-600" />
+            <span>Gán Mức C</span>
           </button>
         </div>
       </div>
@@ -1279,57 +1734,187 @@ export const SubjectTeacherMonthlyReport: React.FC<SubjectTeacherMonthlyReportPr
                           {/* Quick Suggestion Button */}
                           <button
                             type="button"
-                            onClick={() =>
-                              setActiveSuggestionStudentId(
-                                activeSuggestionStudentId === stu.id ? null : stu.id
-                              )
-                            }
+                            onClick={() => openSuggestionForStudent(stu.id)}
                             className={`p-1.5 rounded-xl border transition cursor-pointer shrink-0 ${
                               activeSuggestionStudentId === stu.id
-                                ? 'bg-amber-100 text-amber-800 border-amber-300'
-                                : 'bg-slate-50 text-slate-500 hover:text-amber-600 border-slate-200'
+                                ? 'bg-amber-100 text-amber-800 border-amber-300 ring-2 ring-amber-200'
+                                : 'bg-slate-50 text-slate-500 hover:text-amber-600 hover:bg-amber-50 border-slate-200'
                             }`}
-                            title="Gợi ý câu nhận xét chuẩn Thông tư 27"
+                            title="Gợi ý nhận xét phân hóa theo đối tượng học sinh (Chuẩn TT27)"
                           >
                             <Lightbulb className="w-4 h-4" />
                           </button>
 
-                          {/* Quick Suggestion Dropdown */}
+                          {/* Quick Suggestion Dropdown / Modal */}
                           {activeSuggestionStudentId === stu.id && (
-                            <div className="absolute right-0 top-10 z-40 w-80 bg-white p-3 rounded-2xl shadow-xl border border-slate-200 space-y-2 animate-in fade-in zoom-in-95">
-                              <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
-                                <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
-                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                                  <span>Gợi ý câu nhận xét môn {subjectClass.subject}</span>
-                                </span>
+                            <div className="absolute right-0 top-10 z-50 w-96 sm:w-[480px] bg-white p-3.5 rounded-2xl shadow-2xl border-2 border-purple-200 space-y-3 animate-in fade-in zoom-in-95">
+                              {/* Header */}
+                              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                <div>
+                                  <div className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                                    <Lightbulb className="w-4 h-4 text-amber-500 shrink-0" />
+                                    <span>Gợi ý nhận xét môn {subjectClass.subject}</span>
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                    <span>Em: <strong className="text-slate-800">{stu.fullName}</strong></span>
+                                    <span>•</span>
+                                    <span>
+                                      Mức: <strong className={row.level === 'T' ? 'text-emerald-700 font-bold' : row.level === 'H' ? 'text-blue-700 font-bold' : 'text-rose-700 font-bold'}>{row.level}</strong>
+                                    </span>
+                                    <span>•</span>
+                                    <span>Thi đua: <strong className={comp.total >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{comp.total >= 0 ? `+${comp.total}` : comp.total}đ</strong></span>
+                                  </div>
+                                </div>
                                 <button
+                                  type="button"
                                   onClick={() => setActiveSuggestionStudentId(null)}
-                                  className="text-slate-400 hover:text-slate-600 p-0.5"
+                                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition"
                                 >
-                                  <X className="w-3.5 h-3.5" />
+                                  <X className="w-4 h-4" />
                                 </button>
                               </div>
 
-                              <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                                {availableSuggestions.map((sug, sIdx) => (
+                              {/* Smart One-Click Recommendation Button */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const smartCmt = getSmartCommentForStudent(stu.id);
+                                  setMonthlyData((prev) => ({
+                                    ...prev,
+                                    [stu.id]: {
+                                      ...(prev[stu.id] || { level: 'T' }),
+                                      note: smartCmt,
+                                    },
+                                  }));
+                                  setActiveSuggestionStudentId(null);
+                                  triggerToast(`Đã áp dụng gợi ý phù hợp nhất cho em ${stu.fullName}!`);
+                                }}
+                                className="w-full py-1.5 px-3 bg-gradient-to-r from-amber-50 via-purple-50 to-indigo-50 hover:from-amber-100 hover:to-indigo-100 border border-purple-200 rounded-xl text-xs font-bold text-purple-900 transition flex items-center justify-between shadow-2xs cursor-pointer"
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Gợi ý tự động chuẩn đối tượng cho em này</span>
+                                </span>
+                                <span className="text-[10px] bg-purple-600 text-white font-bold px-2 py-0.5 rounded-full">
+                                  Điền ngay ⚡
+                                </span>
+                              </button>
+
+                              {/* Search Bar */}
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                                <input
+                                  type="text"
+                                  value={suggestionSearch}
+                                  onChange={(e) => setSuggestionSearch(e.target.value)}
+                                  placeholder="Tìm gợi ý theo từ khóa (phát âm, tự tin, nghe, viết, tiến bộ...)..."
+                                  className="w-full pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                                />
+                              </div>
+
+                              {/* Category Filter Tabs */}
+                              <div className="flex flex-wrap gap-1 border-b border-slate-100 pb-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setSuggestionCategory('all')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer border ${
+                                    suggestionCategory === 'all'
+                                      ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  Tất cả
+                                </button>
+                                {availableCategoryGroups.map((cat) => (
                                   <button
-                                    key={sIdx}
+                                    key={cat.id}
                                     type="button"
-                                    onClick={() => {
-                                      setMonthlyData((prev) => ({
-                                        ...prev,
-                                        [stu.id]: {
-                                          ...(prev[stu.id] || { level: 'T' }),
-                                          note: sug,
-                                        },
-                                      }));
-                                      setActiveSuggestionStudentId(null);
-                                    }}
-                                    className="w-full text-left p-2 rounded-xl text-[11px] text-slate-700 hover:bg-purple-50 hover:text-purple-900 transition leading-snug cursor-pointer border border-transparent hover:border-purple-200"
+                                    onClick={() => setSuggestionCategory(cat.id)}
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer border ${
+                                      suggestionCategory === cat.id
+                                        ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                    }`}
                                   >
-                                    • {sug}
+                                    {cat.badge}
                                   </button>
                                 ))}
+                              </div>
+
+                              {/* Suggestions List */}
+                              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                                {filteredCommentSuggestions.length === 0 ? (
+                                  <div className="p-3 text-center text-xs text-slate-400 italic">
+                                    Không tìm thấy nhận xét phù hợp với từ khóa tìm kiếm.
+                                  </div>
+                                ) : (
+                                  filteredCommentSuggestions.map((item, sIdx) => (
+                                    <div
+                                      key={sIdx}
+                                      className="p-2 rounded-xl text-[11px] text-slate-700 bg-slate-50/70 hover:bg-purple-50/80 hover:text-purple-950 transition leading-snug border border-slate-200/80 hover:border-purple-300 flex items-start justify-between gap-2"
+                                    >
+                                      <div
+                                        onClick={() => {
+                                          setMonthlyData((prev) => ({
+                                            ...prev,
+                                            [stu.id]: {
+                                              ...(prev[stu.id] || { level: 'T' }),
+                                              note: item.text,
+                                            },
+                                          }));
+                                          setActiveSuggestionStudentId(null);
+                                        }}
+                                        className="flex-1 cursor-pointer"
+                                      >
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                          <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded border ${item.badgeColor}`}>
+                                            {item.categoryLabel}
+                                          </span>
+                                        </div>
+                                        <p className="font-medium text-slate-800">{item.text}</p>
+                                      </div>
+
+                                      <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                                        <button
+                                          type="button"
+                                          title="Gán thay thế nhận xét này"
+                                          onClick={() => {
+                                            setMonthlyData((prev) => ({
+                                              ...prev,
+                                              [stu.id]: {
+                                                ...(prev[stu.id] || { level: 'T' }),
+                                                note: item.text,
+                                              },
+                                            }));
+                                            setActiveSuggestionStudentId(null);
+                                          }}
+                                          className="px-2 py-0.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-[10px] font-bold cursor-pointer"
+                                        >
+                                          Chọn
+                                        </button>
+                                        <button
+                                          type="button"
+                                          title="Thêm vào đuôi nhận xét hiện có"
+                                          onClick={() => {
+                                            const oldNote = monthlyData[stu.id]?.note || '';
+                                            const newNote = oldNote.trim() ? `${oldNote.trim()} ${item.text}` : item.text;
+                                            setMonthlyData((prev) => ({
+                                              ...prev,
+                                              [stu.id]: {
+                                                ...(prev[stu.id] || { level: 'T' }),
+                                                note: newNote,
+                                              },
+                                            }));
+                                            setActiveSuggestionStudentId(null);
+                                          }}
+                                          className="px-1.5 py-0.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
+                                        >
+                                          + Nối
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
                               </div>
                             </div>
                           )}

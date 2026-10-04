@@ -42,7 +42,10 @@ import {
   Minus,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { SubjectTeacherMonthlyReport } from './SubjectTeacherMonthlyReport';
+import {
+  SubjectTeacherMonthlyReport,
+  ENGLISH_TARGETED_COMMENTS,
+} from './SubjectTeacherMonthlyReport';
 import { storage, getSchoolWeekFromDate, getMonthFromDate } from '../services/storage';
 import {
   SubjectClass,
@@ -207,12 +210,7 @@ export const SPECIALIZED_CRITERIA: SpecializedCriterion[] = [
 // Gợi ý nhận xét mẫu chuẩn Thông tư 27 theo từng môn chuyên
 export const QUICK_COMMENTS_BY_SUBJECT: Record<string, string[]> = {
   'Tiếng Anh': [
-    'Tiếp thu bài nhanh, phát âm chuẩn và tự tin giao tiếp.',
-    'Nắm chắc từ vựng và mẫu câu cơ bản, chăm chỉ học tập.',
-    'Có khả năng nghe - hiểu tốt, tích cực tham gia trò chuyện cùng bạn.',
-    'Cần rèn luyện thêm kỹ năng phát âm và phản xạ nói.',
-    'Cần tập trung ôn luyện từ vựng và tự tin hơn khi trả lời câu hỏi.',
-    'Hoàn thành tốt các bài tập nghe và đọc hiểu trên lớp.',
+    ...ENGLISH_TARGETED_COMMENTS.flatMap((g) => g.comments),
   ],
   'Tin học': [
     'Thao tác máy tính nhanh nhẹn, hoàn thành tốt bài thực hành.',
@@ -528,9 +526,12 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
       }
     });
 
+    // Bảo tồn toàn bộ các đánh giá và nhận xét báo cáo theo tháng (month != null) để không bị đè mất
+    const monthlyEvals = (activeClass.evaluations || []).filter((e) => e.month != null);
+
     const updatedCls: SubjectClass = {
       ...activeClass,
-      evaluations: flattenedList,
+      evaluations: [...monthlyEvals, ...flattenedList],
       updatedAt: new Date().toISOString(),
     };
 
@@ -753,9 +754,9 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
 
       const levelLabel =
         stuEval.level === 'T'
-          ? 'T (Tốt)'
+          ? 'T (Hoàn thành tốt)'
           : stuEval.level === 'C'
-          ? 'C (Cần cố gắng)'
+          ? 'C (Chưa đạt chuẩn)'
           : 'H (Hoàn thành)';
       const scoreVal = stuEval.score !== undefined ? stuEval.score : '-';
       const commentText =
@@ -842,7 +843,7 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
         </table>
 
         <div style="margin-top: 20px; font-size: 12pt; font-style: italic;">
-          * Ghi chú tiêu chuẩn Thông tư 27: Mức T (Hoàn thành Tốt), Mức H (Hoàn thành), Mức C (Chưa hoàn thành / Cần cố gắng).
+          * Ghi chú tiêu chuẩn Thông tư 27: Mức T (Hoàn thành Tốt), Mức H (Hoàn thành), Mức C (Chưa đạt chuẩn).
         </div>
 
         <table class="sign-tbl">
@@ -900,10 +901,10 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
         'Họ và Tên': stu.fullName,
         'Giới Tính': stu.gender,
         'Lớp Chủ Nhiệm': homeClass?.name || stu.currentClassId,
-        'Mức đạt HK1': evHk1.level,
+        'Mức đạt HK1': evHk1.level === 'C' ? 'C (Chưa đạt chuẩn)' : evHk1.level === 'T' ? 'T (Hoàn thành tốt)' : 'H (Hoàn thành)',
         'Điểm KT HK1': evHk1.score ?? '',
         'Nhận xét HK1 (Chuẩn TT27)': evHk1.note,
-        'Mức đạt HK2': evHk2.level,
+        'Mức đạt HK2': evHk2.level === 'C' ? 'C (Chưa đạt chuẩn)' : evHk2.level === 'T' ? 'T (Hoàn thành tốt)' : 'H (Hoàn thành)',
         'Điểm KT HK2': evHk2.score ?? '',
         'Nhận xét HK2 (Chuẩn TT27)': evHk2.note,
         'Điểm thi đua môn chuyên': subjectPts > 0 ? `+${subjectPts}` : subjectPts,

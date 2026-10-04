@@ -127,7 +127,7 @@ export function exportFullSchoolExcel(db: AppDatabase, filename = 'Bao_Cao_Tong_
     const levelMap = {
       T: 'Tốt (T)',
       H: 'Hoàn thành (H)',
-      C: 'Chưa hoàn thành (C)',
+      C: 'Chưa đạt chuẩn (C)',
     };
     return {
       'STT': idx + 1,

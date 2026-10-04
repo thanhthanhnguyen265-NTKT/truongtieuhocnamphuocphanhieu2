@@ -345,6 +345,43 @@ export interface SubjectClass {
   updatedAt: string;
 }
 
+export interface MonthlyReportStudentRow {
+  studentId: string;
+  studentCode: string;
+  studentName: string;
+  gender?: string;
+  homeClassName?: string;
+  level: 'T' | 'H' | 'C'; // T: Hoàn thành tốt, H: Hoàn thành, C: Chưa đạt chuẩn
+  note: string;
+  competitionPoints?: number;
+  competitionRank?: string;
+  posPoints?: number;
+  negPoints?: number;
+}
+
+export interface MonthlyReportEditArchive {
+  id: string; // e.g. ARCHIVE_M9_C4A_1712345678
+  title: string; // e.g. Báo cáo Tháng 9 Lớp 4A - Môn Tiếng Anh
+  classId: string;
+  className: string;
+  subject: string; // e.g. 'Tiếng Anh', 'Toán', 'Tiếng Việt', 'Chủ nhiệm / Tổng hợp'
+  month: number; // 9, 10, 11, 12, 1, 2, 3, 4, 5
+  schoolYearId: string;
+  editedAt: string; // ISO string
+  editedBy: string; // Teacher name
+  studentCount: number;
+  stats: {
+    countT: number;
+    countH: number;
+    countC: number; // Chưa đạt chuẩn
+    pctT: number;
+    pctH: number;
+    pctC: number;
+  };
+  records: MonthlyReportStudentRow[];
+  summaryNote?: string;
+}
+
 export interface DatabaseBackup {
   id: string;
   timestamp: string;
@@ -370,6 +407,7 @@ export interface AppDatabase {
   evaluations: EvaluationRecord[];
   monthlyAssessments?: MonthlyAssessmentTT27[];
   subjectClasses?: SubjectClass[];
+  monthlyReportArchives?: MonthlyReportEditArchive[];
   backups?: DatabaseBackup[];
   criteria: CompetitionCriterion[];
   transactions: CompetitionTransaction[];
