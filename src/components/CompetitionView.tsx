@@ -53,6 +53,26 @@ interface CompetitionViewProps {
 
 type TimeframeType = 'day' | 'week' | 'month' | 'all';
 
+export const QUICK_SUGGESTIONS_POSITIVE = [
+  { name: 'Phát biểu xây dựng bài sôi nổi', points: 2, icon: '🌟' },
+  { name: 'Làm bài tập xuất sắc / đạt điểm 10', points: 3, icon: '📝' },
+  { name: 'Nhiệt tình giúp đỡ bạn cùng tiến', points: 2, icon: '🤝' },
+  { name: 'Ý thức kỷ luật & nề nếp gương mẫu', points: 2, icon: '🏅' },
+  { name: 'Giữ gìn vệ sinh chung sạch đẹp', points: 1, icon: '🧹' },
+  { name: 'Có nhiều tiến bộ vượt bậc', points: 2, icon: '🚀' },
+  { name: 'Tích cực tham gia phong trào thi đua', points: 3, icon: '🚩' },
+];
+
+export const QUICK_SUGGESTIONS_NEGATIVE = [
+  { name: 'Nói chuyện riêng / làm việc riêng trong giờ', points: 2, icon: '⚠️' },
+  { name: 'Chưa làm bài tập về nhà', points: 2, icon: '🚫' },
+  { name: 'Mất trật tự trong lớp học', points: 2, icon: '🔊' },
+  { name: 'Quên đồ dùng học tập / sách vở', points: 1, icon: '🎒' },
+  { name: 'Đi học muộn / chưa đúng giờ', points: 2, icon: '⏰' },
+  { name: 'Vi phạm quy định đồng phục', points: 1, icon: '👕' },
+  { name: 'Làm mất vệ sinh trong lớp', points: 1, icon: '🗑️' },
+];
+
 export const CompetitionView: React.FC<CompetitionViewProps> = ({
   initialClassId,
   onOpenOwnerModal,
@@ -246,13 +266,11 @@ export const CompetitionView: React.FC<CompetitionViewProps> = ({
       critPoints = selectedCriterion.points;
       critId = selectedCriterion.id;
     } else {
-      if (!customName.trim()) {
-        alert('Vui lòng nhập tên hành vi hoặc thành tích thi đua.');
-        return;
-      }
-      critName = customName.trim();
+      const trimmedName = customName.trim();
+      critName = trimmedName || (customType === 'positive' ? 'Khen thưởng thi đua theo yêu cầu GV' : 'Nhắc nhở nề nếp theo yêu cầu GV');
       critType = customType;
-      critPoints = customType === 'positive' ? Math.abs(customPoints) : -Math.abs(customPoints);
+      const ptsVal = Math.max(0.5, Math.abs(Number(customPoints) || 1));
+      critPoints = customType === 'positive' ? ptsVal : -ptsVal;
       critId = 'CR_CUSTOM';
     }
 
@@ -901,7 +919,7 @@ export const CompetitionView: React.FC<CompetitionViewProps> = ({
                     <div
                       key={stu.id}
                       onClick={() => toggleStudentSelection(stu.id)}
-                      className={`p-2.5 rounded-xl border text-xs cursor-pointer transition flex items-center justify-between select-none ${
+                      className={`group relative p-2.5 rounded-xl border text-xs cursor-pointer transition flex items-center justify-between select-none ${
                         isSelected
                           ? 'border-purple-600 bg-purple-50/70 text-purple-900 shadow-xs ring-1 ring-purple-500'
                           : 'border-slate-200 hover:border-purple-300 bg-slate-50/50 hover:bg-white'
@@ -919,17 +937,461 @@ export const CompetitionView: React.FC<CompetitionViewProps> = ({
                           <div className="text-[10px] text-slate-400 font-mono">{stu.studentCode}</div>
                         </div>
                       </div>
-                      <span
-                        className={`font-black text-[11px] shrink-0 ml-1 ${
-                          score >= 0 ? 'text-emerald-700' : 'text-rose-700'
-                        }`}
-                      >
-                        {score > 0 ? `+${score}` : score} đ
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                        <span
+                          className={`font-black text-[11px] ${
+                            score >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                          }`}
+                        >
+                          {score > 0 ? `+${score}` : score} đ
+                        </span>
+                        <button
+                          type="button"
+                          title="Chọn riêng em này để nhập điểm cộng/trừ theo yêu cầu"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedStudentIds([stu.id]);
+                            setScoringMode('custom');
+                          }}
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold border transition ${
+                            isSelected && selectedStudentIds.length === 1 && selectedStudentIds[0] === stu.id
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'bg-white hover:bg-purple-100 text-purple-700 border-slate-200 group-hover:border-purple-300'
+                          }`}
+                        >
+                          Ghi điểm
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
             </div>
+
+            {/* MỤC NHẬP ĐIỂM CỘNG TRỪ THI ĐUA THEO YÊU CẦU CỦA GIÁO VIÊN */}
+            {selectedStudentIds.length === 0 ? (
+              <div className="p-4 rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50/40 text-center space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-100/80 text-purple-800 rounded-full font-bold text-xs">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600 animate-pulse" />
+                  <span>Mục Nhập Điểm Cộng / Trừ Thi Đua Theo Yêu Cầu Của Giáo Viên</span>
+                </div>
+                <p className="text-xs text-slate-600 font-medium">
+                  👆 Vui lòng tích chọn 1 hoặc nhiều học sinh ở bảng trên (hoặc nhấn nút <strong className="text-purple-700">"Chọn cả lớp"</strong> / bấm nút <strong className="text-purple-700">"Ghi điểm"</strong> tại từng em) để hiển thị bảng nhập điểm cộng/trừ thi đua theo yêu cầu riêng của thầy cô.
+                </p>
+              </div>
+            ) : (
+              <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-50 via-indigo-50/60 to-purple-100/70 border-2 border-purple-500 shadow-md space-y-4 animate-fadeIn">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-purple-200/70">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center shadow-xs">
+                      <Award className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-sm text-purple-950 flex items-center gap-2">
+                        Mục Nhập Điểm Cộng / Trừ Thi Đua Theo Yêu Cầu Của Giáo Viên
+                        <span className="text-[10px] bg-purple-600 text-white font-bold px-2.5 py-0.5 rounded-full">
+                          Đã chọn {selectedStudentIds.length} em
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-purple-700 font-medium">
+                        Thầy cô có thể tự do nhập số điểm cộng/trừ và lý do khen thưởng - nhắc nhở theo nhu cầu thực tế
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedStudentIds([])}
+                      className="px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 rounded-lg transition"
+                    >
+                      Bỏ chọn tất cả ({selectedStudentIds.length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Students Preview Chips */}
+                <div className="bg-white/90 p-3 rounded-xl border border-purple-100 space-y-1.5 shadow-2xs">
+                  <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                    <span>Học sinh đang được chọn ghi điểm:</span>
+                    <span className="text-[10px] text-purple-700 font-bold">{selectedStudentIds.length} em</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                    {selectedStudentIds.map((sid) => {
+                      const stu = db.students.find((s) => s.id === sid);
+                      return (
+                        <span
+                          key={sid}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-100/90 text-purple-900 border border-purple-200 rounded-lg text-xs font-bold"
+                        >
+                          <span>{stu?.fullName || sid}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleStudentSelection(sid)}
+                            className="text-purple-600 hover:text-rose-600 font-black ml-0.5"
+                            title="Bỏ chọn em này"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Mode Selector within this section */}
+                <div className="flex bg-white p-1 rounded-xl border border-purple-200 text-xs font-bold shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setScoringMode('custom')}
+                    className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                      scoringMode === 'custom'
+                        ? 'bg-purple-600 text-white shadow-xs font-extrabold'
+                        : 'text-slate-600 hover:text-purple-700'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>1. Nhập điểm tùy chỉnh theo yêu cầu của Giáo viên</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScoringMode('preset')}
+                    className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                      scoringMode === 'preset'
+                        ? 'bg-purple-600 text-white shadow-xs font-extrabold'
+                        : 'text-slate-600 hover:text-purple-700'
+                    }`}
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>2. Chọn tiêu chí thi đua có sẵn</span>
+                  </button>
+                </div>
+
+                {scoringMode === 'custom' ? (
+                  <div className="bg-white p-4 rounded-xl border border-purple-200 space-y-3.5 shadow-2xs">
+                    {/* Plus / Minus Type Selector */}
+                    <div>
+                      <label className="block font-bold text-xs text-slate-700 mb-1.5">
+                        Chọn loại điểm thi đua:
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCustomType('positive')}
+                          className={`py-2 px-3 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-2 transition ${
+                            customType === 'positive'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              : 'bg-emerald-50/50 hover:bg-emerald-50 text-emerald-800 border-emerald-200'
+                          }`}
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>CỘNG ĐIỂM THƯỞNG (+)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCustomType('negative')}
+                          className={`py-2 px-3 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-2 transition ${
+                            customType === 'negative'
+                              ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                              : 'bg-rose-50/50 hover:bg-rose-50 text-rose-800 border-rose-200'
+                          }`}
+                        >
+                          <Minus className="w-4 h-4" />
+                          <span>TRỪ ĐIỂM NHẮC NHỞ (-)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Numeric Points Input & Quick Stepper */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="font-bold text-xs text-slate-700">
+                          Số điểm {customType === 'positive' ? 'cộng thưởng' : 'trừ nhắc nhở'} theo yêu cầu:
+                        </label>
+                        <span
+                          className={`text-xs font-black px-2.5 py-0.5 rounded-md ${
+                            customType === 'positive'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {customType === 'positive' ? `+${customPoints}` : `-${customPoints}`} điểm
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Stepper + direct number input */}
+                        <div className="flex items-center border border-slate-300 rounded-xl overflow-hidden bg-white shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setCustomPoints((prev) => Math.max(1, prev - 1))}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-sm transition"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="0.5"
+                            max="100"
+                            step="0.5"
+                            value={customPoints}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setCustomPoints(isNaN(val) ? 1 : Math.max(0.5, Math.min(100, val)));
+                            }}
+                            className="w-16 py-1.5 text-center font-black text-slate-800 text-sm focus:outline-hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCustomPoints((prev) => Math.min(100, prev + 1))}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-sm transition"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <span className="text-xs font-bold text-slate-600">điểm</span>
+
+                        <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+                        {/* Quick Presets */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] text-slate-400 font-medium">Chọn nhanh:</span>
+                          {[1, 2, 3, 5, 10].map((pt) => (
+                            <button
+                              key={pt}
+                              type="button"
+                              onClick={() => setCustomPoints(pt)}
+                              className={`px-2.5 py-1 rounded-lg font-bold border text-xs transition ${
+                                customPoints === pt
+                                  ? customType === 'positive'
+                                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                    : 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              {customType === 'positive' ? `+${pt}` : `-${pt}`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Reason / Behavior Title Input */}
+                    <div>
+                      <label className="block font-bold text-xs text-slate-700 mb-1">
+                        Tên hành vi / Lý do {customType === 'positive' ? 'khen thưởng' : 'nhắc nhở'} theo yêu cầu của Giáo viên:
+                      </label>
+                      <input
+                        type="text"
+                        value={customName}
+                        onChange={(e) => setCustomName(e.target.value)}
+                        placeholder={
+                          customType === 'positive'
+                            ? 'Ví dụ: Tích cực phát biểu xây dựng bài, Hoàn thành tốt bài tập trên lớp...'
+                            : 'Ví dụ: Nói chuyện riêng trong giờ, Quên mang đồ dùng học tập...'
+                        }
+                        className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-hidden font-medium"
+                      />
+
+                      {/* Quick Suggestions Chips */}
+                      <div className="mt-2 space-y-1">
+                        <div className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-purple-600" />
+                          <span>Gợi ý lý do phổ biến (Bấm vào để điền nhanh nội dung & điểm):</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {(customType === 'positive'
+                            ? QUICK_SUGGESTIONS_POSITIVE
+                            : QUICK_SUGGESTIONS_NEGATIVE
+                          ).map((sug, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setCustomName(sug.name);
+                                setCustomPoints(sug.points);
+                              }}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-slate-200 bg-slate-50 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-800 transition flex items-center gap-1"
+                            >
+                              <span>{sug.icon}</span>
+                              <span>{sug.name}</span>
+                              <span className="font-bold opacity-75">
+                                ({customType === 'positive' ? `+${sug.points}` : `-${sug.points}`}đ)
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Date / Week / Month Inline Picker */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                      <div>
+                        <span className="text-[11px] text-slate-500 block mb-0.5">Ngày chấm:</span>
+                        <input
+                          type="date"
+                          value={scoringDate}
+                          onChange={(e) => handleScoringDateChange(e.target.value)}
+                          className="w-full px-2 py-1 border border-slate-300 rounded-lg font-bold bg-white text-xs"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[11px] text-slate-500 block mb-0.5">Tuần học:</span>
+                        <select
+                          value={scoringWeek}
+                          onChange={(e) => setScoringWeek(parseInt(e.target.value, 10))}
+                          className="w-full px-2 py-1 border border-slate-300 rounded-lg font-bold bg-white text-xs"
+                        >
+                          {Array.from({ length: 35 }, (_, i) => i + 1).map((w) => (
+                            <option key={w} value={w}>
+                              Tuần {w}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <span className="text-[11px] text-slate-500 block mb-0.5">Tháng học:</span>
+                        <select
+                          value={scoringMonth}
+                          onChange={(e) => setScoringMonth(parseInt(e.target.value, 10))}
+                          className="w-full px-2 py-1 border border-slate-300 rounded-lg font-bold bg-white text-xs"
+                        >
+                          {[9, 10, 11, 12, 1, 2, 3, 4, 5].map((m) => (
+                            <option key={m} value={m}>
+                              Tháng {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Note */}
+                    <div>
+                      <input
+                        type="text"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Ghi chú thêm về tiết học hoặc lý do cụ thể (tùy chọn)..."
+                        className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                      />
+                    </div>
+
+                    {/* Submit Button */}
+                    <button
+                      type="button"
+                      onClick={handleApplyScore}
+                      disabled={isSavingScore || selectedStudentIds.length === 0}
+                      className={`w-full py-3 rounded-xl font-black text-xs text-white shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
+                        customType === 'positive'
+                          ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700'
+                          : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700'
+                      }`}
+                    >
+                      {isSavingScore ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Đang lưu trữ dữ liệu...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 stroke-[3]" />
+                          <span>
+                            XÁC NHẬN LƯU {customType === 'positive' ? `+${customPoints}` : `-${customPoints}`} ĐIỂM CHO {selectedStudentIds.length} HỌC SINH ĐÃ CHỌN
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  /* Preset Criteria mode inside the dedicated section */
+                  <div className="bg-white p-4 rounded-xl border border-purple-200 space-y-3.5 shadow-2xs">
+                    <div>
+                      <label className="block font-bold text-xs text-slate-700 mb-1">
+                        Chọn tiêu chí thi đua có sẵn của trường:
+                      </label>
+                      <select
+                        value={selectedCriterionId}
+                        onChange={(e) => setSelectedCriterionId(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl font-medium text-xs"
+                      >
+                        <optgroup label="🌟 Cộng điểm thưởng (+)">
+                          {db.criteria
+                            .filter((c) => c.type === 'positive')
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                [+{c.points}đ] {c.name} ({c.category})
+                              </option>
+                            ))}
+                        </optgroup>
+                        <optgroup label="⚠️ Trừ điểm nhắc nhở (-)">
+                          {db.criteria
+                            .filter((c) => c.type === 'negative')
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                [-{Math.abs(c.points)}đ] {c.name} ({c.category})
+                              </option>
+                            ))}
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    {selectedCriterion && (
+                      <div
+                        className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
+                          selectedCriterion.type === 'positive'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                            : 'bg-rose-50 border-rose-200 text-rose-900'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold">{selectedCriterion.name}</div>
+                          <div className="text-[10px] opacity-80 mt-0.5">
+                            Phân loại: {selectedCriterion.category}
+                          </div>
+                        </div>
+                        <div className="text-base font-black">
+                          {selectedCriterion.type === 'positive'
+                            ? `+${selectedCriterion.points}`
+                            : `-${Math.abs(selectedCriterion.points)}`}{' '}
+                          đ
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <input
+                        type="text"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Ghi chú thêm (tùy chọn)..."
+                        className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleApplyScore}
+                      disabled={isSavingScore || selectedStudentIds.length === 0}
+                      className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isSavingScore ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Đang lưu trữ dữ liệu...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 stroke-[3]" />
+                          <span>
+                            LƯU ĐIỂM THEO TIÊU CHÍ CHO {selectedStudentIds.length} HỌC SINH ĐÃ CHỌN
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Recent scoring transactions of this class */}
             {recentClassTransactions.length > 0 && (
@@ -1178,28 +1640,75 @@ export const CompetitionView: React.FC<CompetitionViewProps> = ({
 
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">
-                        Tên hành vi / Thành tích:
+                        Tên hành vi / Lý do theo yêu cầu:
                       </label>
                       <input
                         type="text"
                         placeholder="Ví dụ: Giúp đỡ bạn cùng lớp, Điểm 10 môn Toán..."
                         value={customName}
                         onChange={(e) => setCustomName(e.target.value)}
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded-lg"
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs"
                       />
+                      {/* Quick Suggestions Chips */}
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {(customType === 'positive'
+                          ? QUICK_SUGGESTIONS_POSITIVE.slice(0, 4)
+                          : QUICK_SUGGESTIONS_NEGATIVE.slice(0, 4)
+                        ).map((sug, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setCustomName(sug.name);
+                              setCustomPoints(sug.points);
+                            }}
+                            className="px-2 py-0.5 text-[10px] rounded-md border border-slate-200 bg-white hover:bg-purple-50 text-slate-700 transition"
+                          >
+                            {sug.name} ({customType === 'positive' ? `+${sug.points}` : `-${sug.points}`}đ)
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">
-                        Số điểm {customType === 'positive' ? 'cộng' : 'trừ'}:
+                        Số điểm {customType === 'positive' ? 'cộng' : 'trừ'} theo yêu cầu:
                       </label>
                       <div className="flex items-center gap-2">
+                        <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white">
+                          <button
+                            type="button"
+                            onClick={() => setCustomPoints((prev) => Math.max(1, prev - 1))}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min="0.5"
+                            max="100"
+                            step="0.5"
+                            value={customPoints}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setCustomPoints(isNaN(val) ? 1 : Math.max(0.5, Math.min(100, val)));
+                            }}
+                            className="w-14 py-1 text-center font-bold text-slate-800 text-xs focus:outline-hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCustomPoints((prev) => Math.min(100, prev + 1))}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                          >
+                            +
+                          </button>
+                        </div>
                         {[1, 2, 3, 5, 10].map((pt) => (
                           <button
                             key={pt}
                             type="button"
                             onClick={() => setCustomPoints(pt)}
-                            className={`px-3 py-1 rounded-lg font-bold border text-xs ${
+                            className={`px-2.5 py-1 rounded-lg font-bold border text-xs ${
                               customPoints === pt
                                 ? customType === 'positive'
                                   ? 'bg-emerald-600 text-white border-emerald-600'

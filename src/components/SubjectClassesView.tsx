@@ -39,6 +39,7 @@ import {
   ChevronLeft,
   RefreshCw,
   Printer,
+  Minus,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { SubjectTeacherMonthlyReport } from './SubjectTeacherMonthlyReport';
@@ -66,6 +67,24 @@ export const SPECIALIZED_SUBJECTS = [
 ];
 
 // Tiêu chí cộng / trừ điểm thi đua đặc thù cho giáo viên chuyên / nhô
+export const QUICK_SUBJECT_SUGGESTIONS_POSITIVE = [
+  { name: 'Phát biểu bài sôi nổi & chuẩn xác', points: 2, icon: '🌟' },
+  { name: 'Thực hành đạt yêu cầu tốt / xuất sắc', points: 3, icon: '🔬' },
+  { name: 'Sản phẩm môn học sáng tạo, chất lượng', points: 3, icon: '🎨' },
+  { name: 'Đạt điểm kiểm tra miệng / 15 phút tốt', points: 5, icon: '💯' },
+  { name: 'Hợp tác nhóm tốt và hỗ trợ bạn bè', points: 2, icon: '🤝' },
+  { name: 'Chuẩn bị đầy đủ sách vở, dụng cụ học tập', points: 2, icon: '📚' },
+  { name: 'Có nhiều tiến bộ vượt bậc trong tiết học', points: 2, icon: '🚀' },
+];
+
+export const QUICK_SUBJECT_SUGGESTIONS_NEGATIVE = [
+  { name: 'Quên đồ dùng học tập / sách vở bộ môn', points: 2, icon: '🎒' },
+  { name: 'Không hoàn thành bài tập thực hành trên lớp', points: 2, icon: '⚠️' },
+  { name: 'Mất trật tự, làm việc riêng trong giờ học', points: 2, icon: '🔊' },
+  { name: 'Sử dụng thiết bị không đúng yêu cầu của GV', points: 2, icon: '📱' },
+  { name: 'Không tập trung nghe giảng / ngủ gật', points: 1, icon: '💤' },
+];
+
 export interface SpecializedCriterion {
   id: string;
   name: string;
@@ -303,6 +322,12 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
   const [scoringNote, setScoringNote] = useState<string>('');
   const [criterionFilterType, setCriterionFilterType] = useState<'all' | 'positive' | 'negative'>('all');
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+
+  // Custom competition scoring state for subject teachers
+  const [subjectScoringMode, setSubjectScoringMode] = useState<'custom' | 'preset'>('custom');
+  const [subjectCustomPoints, setSubjectCustomPoints] = useState<number>(2);
+  const [subjectCustomType, setSubjectCustomType] = useState<'positive' | 'negative'>('positive');
+  const [subjectCustomName, setSubjectCustomName] = useState<string>('');
 
   // Folder-based teacher grouping states
   const [viewMode, setViewMode] = useState<'folder' | 'flat'>('folder');
@@ -611,8 +636,26 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
       return;
     }
 
-    const crit = SPECIALIZED_CRITERIA.find((c) => c.id === selectedCriterionId);
-    if (!crit) return;
+    let critName = '';
+    let critType: 'positive' | 'negative' = 'positive';
+    let critPoints = 0;
+    let critId = 'CR_CUSTOM_SUBJECT';
+
+    if (subjectScoringMode === 'preset') {
+      const crit = SPECIALIZED_CRITERIA.find((c) => c.id === selectedCriterionId);
+      if (!crit) return;
+      critName = crit.name;
+      critType = crit.type;
+      critPoints = crit.points;
+      critId = crit.id;
+    } else {
+      const trimmed = subjectCustomName.trim();
+      critName = trimmed || (subjectCustomType === 'positive' ? 'Khen thưởng thi đua môn học' : 'Nhắc nhở nề nếp môn học');
+      critType = subjectCustomType;
+      const ptsVal = Math.max(0.5, Math.abs(Number(subjectCustomPoints) || 1));
+      critPoints = subjectCustomType === 'positive' ? ptsVal : -ptsVal;
+      critId = 'CR_CUSTOM_SUBJECT';
+    }
 
     const teacherName =
       activeClass.teacherName || db.currentUser?.fullName || 'Giáo viên bộ môn';
@@ -627,16 +670,16 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
           studentName: stu?.fullName || '',
           classId: stu?.currentClassId || activeClass.id,
           schoolYearId: db.currentSchoolYearId || 'SY2026_2027',
-          type: crit.type,
-          criterionId: crit.id,
-          criterionName: crit.name,
-          points: crit.points,
+          type: critType,
+          criterionId: critId,
+          criterionName: critName,
+          points: critPoints,
           date: today,
           weekNumber: getSchoolWeekFromDate(today),
           monthNumber: getMonthFromDate(today),
           note: scoringNote.trim()
             ? `[Môn ${activeClass.subject}] ${scoringNote.trim()}`
-            : `[Môn ${activeClass.subject}] ${crit.name}`,
+            : `[Môn ${activeClass.subject}] ${critName}`,
           teacherId: activeClass.teacherId || 'T_CUSTOM',
           teacherName,
           createdAt: new Date().toISOString(),
@@ -651,21 +694,24 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
       {
         category: 'Thi đua',
         action: `Cộng/Trừ điểm môn ${activeClass.subject}`,
-        details: `Đã ${crit.points > 0 ? 'cộng' : 'trừ'} ${Math.abs(
-          crit.points
+        details: `Đã ${critPoints > 0 ? 'cộng' : 'trừ'} ${Math.abs(
+          critPoints
         )}đ cho ${selectedStudentIdsForScoring.length} học sinh môn ${
           activeClass.subject
-        } (${crit.name}).`,
+        } (${critName}).`,
       }
     );
 
     triggerToast(
-      `Đã ${crit.points > 0 ? 'cộng' : 'trừ'} ${Math.abs(crit.points)} điểm cho ${
+      `Đã ${critPoints > 0 ? 'cộng' : 'trừ'} ${Math.abs(critPoints)} điểm cho ${
         selectedStudentIdsForScoring.length
-      } học sinh thành công!`
+      } học sinh môn ${activeClass.subject} thành công!`
     );
     setSelectedStudentIdsForScoring([]);
     setScoringNote('');
+    if (subjectScoringMode === 'custom') {
+      setSubjectCustomName('');
+    }
   };
 
   // Toggle single student for scoring
@@ -2227,70 +2273,333 @@ export const SubjectClassesView: React.FC<SubjectClassesViewProps> = ({
                 </div>
 
                 {/* Horizontal Quick Student Selector Chips */}
-                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 bg-white rounded-lg border border-slate-200">
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200">
                   {activeClassStudents.map((stu) => {
                     const isChecked = selectedStudentIdsForScoring.includes(stu.id);
                     const pts = getStudentSubjectPoints(stu.id);
                     return (
-                      <button
+                      <div
                         key={stu.id}
-                        type="button"
                         onClick={() => toggleStudentScoring(stu.id)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                        className={`group px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 select-none ${
                           isChecked
-                            ? 'bg-indigo-600 text-white font-bold'
+                            ? 'bg-indigo-600 text-white font-bold ring-2 ring-indigo-400'
                             : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                         }`}
                       >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer"
+                        />
                         <span>{stu.fullName}</span>
                         <span
-                          className={`text-[10px] px-1 rounded-md ${
+                          className={`text-[10px] px-1 rounded-md font-bold ${
                             pts >= 0 ? 'bg-indigo-900/30 text-white' : 'bg-rose-900/30 text-white'
                           }`}
                         >
                           {pts >= 0 ? `+${pts}` : pts}đ
                         </span>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
 
-                {/* Note and Apply Action */}
-                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-                  <input
-                    type="text"
-                    value={scoringNote}
-                    onChange={(e) => setScoringNote(e.target.value)}
-                    placeholder="Ghi chú thêm về tiết học (ví dụ: Tiết 2 Thứ 3, thực hành xuất sắc...)"
-                    className="flex-1 w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
-                  />
+                {/* MỤC NHẬP ĐIỂM CỘNG TRỪ THI ĐUA THEO YÊU CẦU CỦA GIÁO VIÊN BỘ MÔN */}
+                {selectedStudentIdsForScoring.length === 0 ? (
+                  <div className="p-3.5 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 text-center space-y-1">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-100/80 text-indigo-800 rounded-full font-bold text-xs">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+                      <span>Mục Nhập Điểm Cộng / Trừ Thi Đua Theo Yêu Cầu Của Giáo Viên Bộ Môn</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      👆 Bấm chọn 1 hoặc nhiều học sinh ở bảng trên (hoặc nhấn <strong>"Chọn tất cả cả lớp"</strong>) để hiển thị bảng nhập điểm cộng/trừ thi đua theo yêu cầu của thầy cô.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50 via-purple-50/50 to-indigo-100/60 border-2 border-indigo-400 shadow-md space-y-3.5 animate-fadeIn">
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-200/70">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                          <Award className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold text-xs sm:text-sm text-indigo-950 flex items-center gap-1.5">
+                            Mục Nhập Điểm Cộng / Trừ Thi Đua Theo Yêu Cầu Của GV Bộ Môn
+                            <span className="text-[10px] bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-full">
+                              Đã chọn {selectedStudentIdsForScoring.length} em
+                            </span>
+                          </h4>
+                          <p className="text-[10px] text-indigo-700 font-medium">
+                            Môn học: <strong className="font-bold text-indigo-900">{activeClass.subject}</strong> - Lớp: {activeClass.name}
+                          </p>
+                        </div>
+                      </div>
 
-                  {(() => {
-                    const activeCrit = SPECIALIZED_CRITERIA.find(
-                      (c) => c.id === selectedCriterionId
-                    );
-                    const isPos = activeCrit ? activeCrit.type === 'positive' : true;
-                    return (
                       <button
                         type="button"
-                        onClick={handleApplyCompetitionScore}
-                        disabled={selectedStudentIdsForScoring.length === 0}
-                        className={`w-full sm:w-auto px-5 py-2 text-xs font-bold text-white rounded-xl transition shadow-xs flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
-                          selectedStudentIdsForScoring.length === 0
-                            ? 'bg-slate-400 cursor-not-allowed'
-                            : isPos
-                            ? 'bg-emerald-600 hover:bg-emerald-700'
-                            : 'bg-rose-600 hover:bg-rose-700'
+                        onClick={() => setSelectedStudentIdsForScoring([])}
+                        className="px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 rounded-lg transition"
+                      >
+                        Bỏ chọn tất cả ({selectedStudentIdsForScoring.length})
+                      </button>
+                    </div>
+
+                    {/* Mode Selector */}
+                    <div className="flex bg-white p-1 rounded-xl border border-indigo-200 text-xs font-bold shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => setSubjectScoringMode('custom')}
+                        className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          subjectScoringMode === 'custom'
+                            ? 'bg-indigo-600 text-white shadow-xs font-black'
+                            : 'text-slate-600 hover:text-indigo-700'
                         }`}
                       >
-                        <Award className="w-4 h-4" />
-                        <span>
-                          Chấm {activeCrit ? `${activeCrit.points > 0 ? '+' : ''}${activeCrit.points} đ` : ''} ({selectedStudentIdsForScoring.length} em)
-                        </span>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>1. Nhập điểm tùy chỉnh theo yêu cầu của GV bộ môn</span>
                       </button>
-                    );
-                  })()}
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => setSubjectScoringMode('preset')}
+                        className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          subjectScoringMode === 'preset'
+                            ? 'bg-indigo-600 text-white shadow-xs font-black'
+                            : 'text-slate-600 hover:text-indigo-700'
+                        }`}
+                      >
+                        <Award className="w-3.5 h-3.5" />
+                        <span>2. Chọn tiêu chí chuyên biệt có sẵn</span>
+                      </button>
+                    </div>
+
+                    {subjectScoringMode === 'custom' ? (
+                      <div className="bg-white p-3.5 rounded-xl border border-indigo-200 space-y-3 shadow-2xs">
+                        {/* Plus / Minus Type Selector */}
+                        <div>
+                          <label className="block font-bold text-xs text-slate-700 mb-1.5">
+                            Chọn loại điểm thi đua:
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSubjectCustomType('positive')}
+                              className={`py-2 px-3 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                                subjectCustomType === 'positive'
+                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                  : 'bg-emerald-50/50 hover:bg-emerald-50 text-emerald-800 border-emerald-200'
+                              }`}
+                            >
+                              <Plus className="w-4 h-4" />
+                              <span>CỘNG ĐIỂM THƯỞNG MÔN HỌC (+)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSubjectCustomType('negative')}
+                              className={`py-2 px-3 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                                subjectCustomType === 'negative'
+                                  ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                                  : 'bg-rose-50/50 hover:bg-rose-50 text-rose-800 border-rose-200'
+                              }`}
+                            >
+                              <Minus className="w-4 h-4" />
+                              <span>TRỪ ĐIỂM NHẮC NHỞ MÔN HỌC (-)</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Numeric Points Input */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label className="font-bold text-xs text-slate-700">
+                              Số điểm {subjectCustomType === 'positive' ? 'cộng thưởng' : 'trừ nhắc nhở'} theo yêu cầu:
+                            </label>
+                            <span
+                              className={`text-xs font-black px-2.5 py-0.5 rounded-md ${
+                                subjectCustomType === 'positive'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {subjectCustomType === 'positive' ? `+${subjectCustomPoints}` : `-${subjectCustomPoints}`} điểm
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center border border-slate-300 rounded-xl overflow-hidden bg-white shadow-2xs">
+                              <button
+                                type="button"
+                                onClick={() => setSubjectCustomPoints((prev) => Math.max(1, prev - 1))}
+                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-sm transition cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="0.5"
+                                max="100"
+                                step="0.5"
+                                value={subjectCustomPoints}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  setSubjectCustomPoints(isNaN(val) ? 1 : Math.max(0.5, Math.min(100, val)));
+                                }}
+                                className="w-16 py-1.5 text-center font-black text-slate-800 text-sm focus:outline-hidden"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setSubjectCustomPoints((prev) => Math.min(100, prev + 1))}
+                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-sm transition cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+                            <span className="text-xs font-bold text-slate-600">điểm</span>
+
+                            <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[11px] text-slate-400 font-medium">Chọn nhanh:</span>
+                              {[1, 2, 3, 5, 10].map((pt) => (
+                                <button
+                                  key={pt}
+                                  type="button"
+                                  onClick={() => setSubjectCustomPoints(pt)}
+                                  className={`px-2.5 py-1 rounded-lg font-bold border text-xs transition cursor-pointer ${
+                                    subjectCustomPoints === pt
+                                      ? subjectCustomType === 'positive'
+                                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                        : 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {subjectCustomType === 'positive' ? `+${pt}` : `-${pt}`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Behavior / Reason Title */}
+                        <div>
+                          <label className="block font-bold text-xs text-slate-700 mb-1">
+                            Lý do / Nội dung thi đua theo yêu cầu của Giáo viên bộ môn:
+                          </label>
+                          <input
+                            type="text"
+                            value={subjectCustomName}
+                            onChange={(e) => setSubjectCustomName(e.target.value)}
+                            placeholder={
+                              subjectCustomType === 'positive'
+                                ? `Ví dụ: Tiết thực hành môn ${activeClass.subject} xuất sắc, Phát biểu bài tốt...`
+                                : `Ví dụ: Quên đồ dùng môn ${activeClass.subject}, Mất trật tự trong giờ thực hành...`
+                            }
+                            className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-medium"
+                          />
+
+                          {/* Quick suggestions */}
+                          <div className="mt-2 space-y-1">
+                            <div className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-indigo-600" />
+                              <span>Gợi ý nhanh cho môn {activeClass.subject}:</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {(subjectCustomType === 'positive'
+                                ? QUICK_SUBJECT_SUGGESTIONS_POSITIVE
+                                : QUICK_SUBJECT_SUGGESTIONS_NEGATIVE
+                              ).map((sug, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    setSubjectCustomName(sug.name);
+                                    setSubjectCustomPoints(sug.points);
+                                  }}
+                                  className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>{sug.icon}</span>
+                                  <span>{sug.name}</span>
+                                  <span className="font-bold opacity-75">
+                                    ({subjectCustomType === 'positive' ? `+${sug.points}` : `-${sug.points}`}đ)
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Note */}
+                        <div>
+                          <input
+                            type="text"
+                            value={scoringNote}
+                            onChange={(e) => setScoringNote(e.target.value)}
+                            placeholder="Ghi chú thêm về tiết dạy hoặc học sinh (tùy chọn)..."
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
+                          />
+                        </div>
+
+                        {/* Submit button */}
+                        <button
+                          type="button"
+                          onClick={handleApplyCompetitionScore}
+                          disabled={selectedStudentIdsForScoring.length === 0}
+                          className={`w-full py-2.5 rounded-xl font-black text-xs text-white shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
+                            subjectCustomType === 'positive'
+                              ? 'bg-emerald-600 hover:bg-emerald-700'
+                              : 'bg-rose-600 hover:bg-rose-700'
+                          }`}
+                        >
+                          <Check className="w-4 h-4 stroke-[3]" />
+                          <span>
+                            XÁC NHẬN LƯU {subjectCustomType === 'positive' ? `+${subjectCustomPoints}` : `-${subjectCustomPoints}`} ĐIỂM CHO {selectedStudentIdsForScoring.length} HỌC SINH ĐÃ CHỌN
+                          </span>
+                        </button>
+                      </div>
+                    ) : (
+                      /* Preset criteria mode */
+                      <div className="bg-white p-3.5 rounded-xl border border-indigo-200 space-y-3 shadow-2xs">
+                        <div className="flex flex-col sm:flex-row items-center gap-3">
+                          <input
+                            type="text"
+                            value={scoringNote}
+                            onChange={(e) => setScoringNote(e.target.value)}
+                            placeholder="Ghi chú thêm về tiết học..."
+                            className="flex-1 w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
+                          />
+
+                          {(() => {
+                            const activeCrit = SPECIALIZED_CRITERIA.find(
+                              (c) => c.id === selectedCriterionId
+                            );
+                            const isPos = activeCrit ? activeCrit.type === 'positive' : true;
+                            return (
+                              <button
+                                type="button"
+                                onClick={handleApplyCompetitionScore}
+                                disabled={selectedStudentIdsForScoring.length === 0}
+                                className={`w-full sm:w-auto px-5 py-2 text-xs font-bold text-white rounded-xl transition shadow-xs flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
+                                  selectedStudentIdsForScoring.length === 0
+                                    ? 'bg-slate-400 cursor-not-allowed'
+                                    : isPos
+                                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                                    : 'bg-rose-600 hover:bg-rose-700'
+                                }`}
+                              >
+                                <Award className="w-4 h-4" />
+                                <span>
+                                  Chấm {activeCrit ? `${activeCrit.points > 0 ? '+' : ''}${activeCrit.points} đ` : ''} ({selectedStudentIdsForScoring.length} em)
+                                </span>
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Student Points Overview Table */}
